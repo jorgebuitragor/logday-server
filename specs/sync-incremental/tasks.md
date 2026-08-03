@@ -8,6 +8,10 @@ Estado: en diseño
       + full resync en cursor inválido).
 - [x] Diseñar el evento WebSocket que dispara el pull incremental
       (topic por usuario, aviso liviano tipo+id+seq).
+- [x] Definir cómo llegan las escrituras al servidor: REST por entidad
+      (`POST`/`PUT`/`DELETE`), no push genérico por batch. Primer caso
+      real: `internal/task` (`POST /tasks`, `PUT /tasks/:id`,
+      `DELETE /tasks/:id`).
 - [ ] Definir paginación del endpoint de cambios.
 - [ ] Definir forma exacta de los updates CRDT dentro del payload.
 - [ ] Definir reconexión/heartbeat del WebSocket.

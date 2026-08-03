@@ -27,11 +27,8 @@ func NewHandler(s *store, jwtSecret []byte) *Handler {
 	return &Handler{store: s, jwtSecret: jwtSecret, limiter: newLoginLimiter()}
 }
 
-// Routes returns the auth-related endpoints, ready to be mounted on a
-// parent router.
-func (h *Handler) Routes() chi.Router {
-	r := chi.NewRouter()
-
+// Routes registers the auth-related endpoints on r.
+func (h *Handler) Routes(r chi.Router) {
 	r.Post("/auth/login", h.login)
 	r.Post("/auth/refresh", h.refresh)
 
@@ -46,8 +43,6 @@ func (h *Handler) Routes() chi.Router {
 			r.Post("/admin/users", h.adminCreateUser)
 		})
 	})
-
-	return r
 }
 
 type tokenResponse struct {

@@ -13,6 +13,36 @@ en tiempo real.
 
 ## Requisitos (EARS)
 
+### Escritura de cambios
+
+- El sistema DEBERÁ exponer endpoints REST por entidad para que un
+  cliente escriba cambios (`POST /<entidad>` para crear/upsert,
+  `PUT /<entidad>/:id` para editar, `DELETE /<entidad>/:id` para
+  soft-delete) — no un endpoint genérico de push por batch. Cada
+  paquete de dominio (`internal/task`, `internal/note`, ...) expone
+  los suyos siguiendo este mismo patrón.
+- El servidor DEBERÁ asignar `seq` en cada escritura — el cliente
+  nunca lo envía ni lo controla, es un concepto puramente del servidor
+  (cursor de sync).
+- El cliente DEBERÁ enviar su propio `updated_at` (el momento real en
+  que hizo la edición localmente, no cuándo llega al servidor) en cada
+  escritura. Sin esto, "last-write-wins" no compara nada real — sería
+  simplemente "gana quien llega último al servidor", que es
+  exactamente el riesgo de pérdida silenciosa que se descartó al
+  elegir LWW sobre "último que escribe gana" (ver
+  `arquitectura-inicial/requirements.md`).
+- Como el cliente manda la fila completa en cada escritura (ver
+  "Resolución de conflictos" en `arquitectura-inicial/requirements.md`
+  para el alcance real de v1 vs. lo aspiracional), estos mismos
+  endpoints son también donde se aplica LWW por fila completa: el
+  servidor DEBERÁ rechazar (409) la escritura entrante si su
+  `updated_at` no es más reciente que el de la fila actualmente
+  almacenada.
+- El riesgo de reloj de dispositivo desincronizado en el cliente que
+  determina `updated_at` es un riesgo aceptado explícitamente desde la
+  decisión original de usar LWW (ver
+  `arquitectura-inicial/requirements.md`) — no es nuevo aquí.
+
 ### Cursor
 
 - El sistema DEBERÁ asignar a cada escritura un número de secuencia

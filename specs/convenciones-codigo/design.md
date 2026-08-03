@@ -54,7 +54,7 @@ paquete de dominio nuevo (`task`, `note`, `sync`...) se sienta igual:
 |---|---|
 | `models.go` | Structs de las entidades del dominio (típicamente no exportados — ver `internal/auth/models.go`). |
 | `store.go` | Acceso SQL: tipo `store` no exportado + `NewStore` exportado (lo necesita `cmd/server` para construirlo), resto de métodos no exportados salvo que otro paquete los necesite. |
-| `handlers.go` | Handlers HTTP del dominio + método `Routes() chi.Router` que los expone para montar en el router principal. |
+| `handlers.go` | Handlers HTTP del dominio + método `Routes(r chi.Router)` que registra sus rutas directamente sobre el router del caller. **No** `Routes() chi.Router` devolviendo un sub-router para montar con `r.Mount("/", ...)` — todos los dominios cuelgan de la raíz (`/auth/login`, `/tasks`, `/devices`...), y `chi.Mount` hace panic si dos routers distintos se montan en el mismo path (`'/'` colisiona). Se descubrió este bug al integrar `task` junto a `auth`. |
 | `middleware.go` | Solo si el dominio expone middleware reusable por otros dominios (hoy únicamente `auth`, con `RequireAuth`/`RequireAdmin`). |
 | `helpers.go` | Utilidades HTTP privadas del dominio (`writeJSON`, `clientIP`, etc.) — no confundir con `internal/security`, que es para crypto genérica, no HTTP. |
 | `bootstrap.go` | Solo si el dominio necesita inicialización especial al arrancar el servidor (hoy únicamente `auth`, para el primer admin). |

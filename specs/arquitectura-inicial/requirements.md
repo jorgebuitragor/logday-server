@@ -61,11 +61,22 @@ para múltiples clientes de Logday (desktop, web, móvil, extensión).
 
 ### Resolución de conflictos
 
-- El sistema DEBERÁ resolver conflictos de campos simples (status,
-  fechas, números, booleanos, y cualquier campo no listado como texto
-  largo) mediante **last-write-wins por campo**, no por registro
-  completo — dos ediciones concurrentes a campos distintos del mismo
-  registro DEBERÁN sobrevivir ambas.
+- **v1 (implementado)**: el sistema resuelve conflictos de campos
+  simples mediante **last-write-wins por fila completa** — el cliente
+  manda la fila entera en cada escritura (semántica upsert) y gana la
+  versión con `updated_at` más reciente. Limitación conocida y
+  aceptada: dos ediciones concurrentes a campos *distintos* de la
+  misma fila mientras ambos dispositivos están offline pueden pisarse
+  entre sí (no solo cuando chocan en el mismo campo). Se aceptó este
+  alcance reducido porque implementar LWW real por campo requiere
+  timestamps por campo en el esquema y que los clientes manden
+  escrituras parciales (PATCH) — ninguna de las dos cosas existe hoy
+  en el cliente de referencia (`task-manager`) — y bloquear la primera
+  entidad de negocio hasta resolver eso no se justificaba.
+- **Aspiracional, no implementado**: last-write-wins **por campo**
+  individual (no por registro completo), de forma que dos ediciones
+  concurrentes a campos distintos de la misma fila sobrevivan ambas.
+  Queda como mejora futura — ver `esquema-datos/design.md`.
 - El sistema DEBERÁ resolver conflictos en campos de texto largo
   (`Note.content`, `daily_entries.content`) mediante **CRDT**, para que
   ediciones concurrentes de texto en distintos dispositivos se

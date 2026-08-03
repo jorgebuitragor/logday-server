@@ -12,6 +12,7 @@ import (
 
 	"github.com/jorgebuitragor/logday-server/internal/auth"
 	"github.com/jorgebuitragor/logday-server/internal/db"
+	"github.com/jorgebuitragor/logday-server/internal/task"
 )
 
 func main() {
@@ -45,6 +46,9 @@ func main() {
 	}
 	authHandler := auth.NewHandler(authStore, []byte(jwtSecret))
 
+	taskStore := task.NewStore(database)
+	taskHandler := task.NewHandler(taskStore, authHandler)
+
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -60,7 +64,8 @@ func main() {
 		}
 	})
 
-	r.Mount("/", authHandler.Routes())
+	authHandler.Routes(r)
+	taskHandler.Routes(r)
 
 	server := &http.Server{
 		Addr:              addr,

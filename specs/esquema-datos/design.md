@@ -1,13 +1,18 @@
 # Esquema de datos — Diseño
 
-Estado: en diseño
+Estado: en diseño (`tasks` implementada — ver `internal/task/` y
+`internal/db/migrations/00005_create_tasks.sql`; las otras 6 tablas
+siguen solo diseñadas)
 
 ## Convenciones generales
 
 - Todas las tablas de datos de usuario llevan `user_id`, `seq`
   (secuencia monótona por usuario, ver `sync-incremental`),
   `updated_at` (timestamptz) y `deleted_at` (timestamptz nullable,
-  soft-delete).
+  soft-delete). Un solo `updated_at` por fila implica LWW por **fila
+  completa** en v1, no por campo individual — ver
+  `arquitectura-inicial/requirements.md` ("Resolución de conflictos")
+  para el alcance real aceptado y lo que queda aspiracional.
 - IDs generados por el cliente (UUID), nunca autoincrement del
   servidor — requisito de `arquitectura-inicial`.
 - Enums (`status`, `type`, `color`, `repeat`) se guardan como `TEXT` +
