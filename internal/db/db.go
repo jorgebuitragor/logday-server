@@ -9,9 +9,11 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+// Open connects to the SQLite database at path, creating its parent
+// directory and the database file if they don't already exist.
 func Open(path string) (*sql.DB, error) {
 	if dir := filepath.Dir(path); dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return nil, fmt.Errorf("creating db directory: %w", err)
 		}
 	}

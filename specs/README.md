@@ -41,3 +41,4 @@ tres archivos:
 | Sync incremental | en diseño | [`sync-incremental/`](./sync-incremental/requirements.md) |
 | Auth multi-usuario | en diseño | [`auth-multiusuario/`](./auth-multiusuario/requirements.md) |
 | Esquema de datos | en diseño | [`esquema-datos/`](./esquema-datos/requirements.md) |
+| Convenciones de código | en diseño | [`convenciones-codigo/`](./convenciones-codigo/requirements.md) |
