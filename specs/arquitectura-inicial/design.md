@@ -73,6 +73,12 @@ resolver en el spec de sync):
 
 ## Mapeo de datos (punto de partida, no cerrado)
 
+Repo de referencia (Logday Desktop): `/Users/jorgebuitrago/Developer/task-manager`
+(`https://github.com/jorgebuitragor/logday.git`). Al diseñar el esquema
+de datos, leer los tipos directamente de ahí en vez de asumir que el
+resumen de abajo sigue vigente — pueden haber cambiado desde que se
+escribió este spec.
+
 Los tipos TS ya existentes en `task-manager` (`src/types/task.ts`,
 `note.ts`, `overtime.ts`, `calendar.ts`, `absence.ts`) son el contrato de
 referencia para las tablas del lado servidor. Cada tabla necesita como
