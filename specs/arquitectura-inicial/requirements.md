@@ -82,6 +82,12 @@ para múltiples clientes de Logday (desktop, web, móvil, extensión).
   ediciones concurrentes de texto en distintos dispositivos se
   mezclen en vez de que una pise a la otra. Ver `design.md` para la
   librería y el rol del servidor en este mecanismo.
+  **v1 (implementado)**: no construido todavía — `Note.content` usa
+  hoy la misma simplificación LWW por fila completa que el resto de
+  campos (ver bullet arriba), no CRDT. Riesgo evaluado como demasiado
+  alto para resolver de paso al implementar `note` (bindings CGO/Rust
+  a mano contra una API de `yffi` no verificada). Seguimiento
+  explícito en `tasks.md`.
 - Ningún otro campo DEBERÁ usar CRDT salvo que se agregue
   explícitamente a la lista de campos de texto largo — el alcance se
   mantiene acotado a propósito (ver `design.md`, "Mapeo de datos").

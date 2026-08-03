@@ -10,8 +10,8 @@ internal/db/         conexión SQLite/Postgres + migraciones (goose), compartida
 internal/security/   primitivas criptográficas genéricas (hash de password, JWT, tokens opacos) — sin lógica de negocio
 internal/auth/       users/devices/sesiones: handlers, store, bootstrap del admin
 internal/task/       handlers, store y ChangesSince (exportada) de Task
+internal/note/       ídem para Note (content aún TEXT plano, no CRDT — ver arquitectura-inicial)
 internal/sync/       fan-out a ChangesSince de cada dominio + GET /sync/changes
-internal/note/       (futuro) ídem para Note
 ...
 ```
 

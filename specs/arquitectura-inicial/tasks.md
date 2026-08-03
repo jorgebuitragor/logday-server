@@ -32,3 +32,13 @@ las decisiones pendientes en `requirements.md` se resuelvan.
       `docker compose up` levanta un binario estático (CGO+musl,
       `mattn/go-sqlite3`) de ~25MB corriendo como usuario no-root, con
       SQLite persistido en volumen y `/health` respondiendo 200.
+- [ ] **Seguimiento explícito**: implementar la integración CRDT
+      (`yrs` vía CGO) para `Note.content`/`daily_entries.content`,
+      decidida arriba pero no construida. `notes` se implementó con
+      `content` como `TEXT` plano + LWW por fila (misma simplificación
+      que `tasks`) porque escribir los bindings CGO/Rust a mano contra
+      una API de `yffi` no verificada se evaluó como riesgo demasiado
+      alto para resolver de paso al construir `note` — ver
+      `esquema-datos/design.md` para el detalle de la desviación. Esta
+      tarea es investigar la API real de `yffi` (o una alternativa) y
+      recién ahí escribir los bindings, en vez de trabajar de memoria.

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/jorgebuitragor/logday-server/internal/note"
 	"github.com/jorgebuitragor/logday-server/internal/task"
 )
 
@@ -15,9 +16,10 @@ type store struct {
 }
 
 // NewStore wires up the store used by NewHandler. It fans out to each
-// domain package's own ChangesSince and merges the results — today
-// that's just internal/task; adding a new synced entity means adding
-// one more block here.
+// domain package's own ChangesSince and merges the results — adding a
+// new synced entity means adding one more block below. Reconsider a
+// generic helper if this grows past 3-4 entities and the repetition
+// starts to hurt (see specs/convenciones-codigo/design.md).
 func NewStore(db *sql.DB) *store {
 	return &store{db: db}
 }
@@ -40,6 +42,25 @@ func (s *store) changesSince(ctx context.Context, userID string, since int64) ([
 			Seq:       t.Seq,
 			Deleted:   t.DeletedAt != nil,
 			UpdatedAt: t.UpdatedAt,
+			Data:      data,
+		})
+	}
+
+	notes, err := note.ChangesSince(ctx, s.db, userID, since)
+	if err != nil {
+		return nil, fmt.Errorf("fetching note changes: %w", err)
+	}
+	for _, n := range notes {
+		data, err := json.Marshal(n)
+		if err != nil {
+			return nil, fmt.Errorf("encoding note %s: %w", n.ID, err)
+		}
+		changes = append(changes, change{
+			Type:      "note",
+			ID:        n.ID,
+			Seq:       n.Seq,
+			Deleted:   n.DeletedAt != nil,
+			UpdatedAt: n.UpdatedAt,
 			Data:      data,
 		})
 	}

@@ -1,8 +1,8 @@
 # Esquema de datos — Diseño
 
-Estado: en diseño (`tasks` implementada — ver `internal/task/` y
-`internal/db/migrations/00005_create_tasks.sql`; las otras 6 tablas
-siguen solo diseñadas)
+Estado: en diseño (`tasks` y `notes` implementadas — ver
+`internal/task/`, `internal/note/`; las otras 5 tablas siguen solo
+diseñadas)
 
 ## Convenciones generales
 
@@ -54,6 +54,17 @@ Excluidos: `filePath`, `linked_paths`.
 
 ### `notes`
 
+Implementada — ver `internal/note/` y
+`internal/db/migrations/00006_create_notes.sql`. **Con una desviación
+deliberada del diseño original**: `content` es `TEXT` plano (LWW por
+fila completa, igual que `tasks.content`), no `content_crdt BLOB`
+todavía — la integración `yrs`/CGO decidida en `arquitectura-inicial`
+no se construyó (requiere escribir bindings CGO/Rust a mano contra una
+API no verificada, evaluado como riesgo demasiado alto para resolver
+de paso). Queda como tarea de seguimiento explícita — ver
+`arquitectura-inicial/tasks.md`. Migrar `content` → `content_crdt`
+cuando se aborde esa tarea.
+
 | Columna | Tipo | Notas |
 |---|---|---|
 | id | TEXT (UUID) | PK |
@@ -64,9 +75,9 @@ Excluidos: `filePath`, `linked_paths`.
 | created | DATE | |
 | updated | DATE | fecha de negocio (la que ve el usuario), distinta de `updated_at` |
 | pinned | BOOLEAN | |
-| content_crdt | BLOB | estado CRDT (`yrs`), ver `arquitectura-inicial/design.md` |
+| content | TEXT | **interino**: LWW por fila, no CRDT — ver nota arriba |
 | seq | INTEGER | |
-| updated_at | TIMESTAMPTZ | bookkeeping de sync |
+| updated_at | TIMESTAMPTZ | bookkeeping de sync, mandado por el cliente (ver `sync-incremental`) |
 | deleted_at | TIMESTAMPTZ NULL | |
 
 Excluido: `filePath`.
