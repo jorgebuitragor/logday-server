@@ -13,5 +13,11 @@ Estado: en diseño
 - [x] Corregir los issues que el linter encontró en el scaffold
       existente (errcheck, gosec: timeouts HTTP y permisos de
       directorio).
+- [x] Documentar convención de nombres de archivo dentro de un paquete
+      de dominio (`models.go`, `store.go`, `handlers.go`, etc.).
+- [x] Extraer primitivas genéricas de `internal/auth` a
+      `internal/security` (hash de password, JWT, tokens opacos) —
+      aplicado retroactivamente sobre auth, primer caso real del
+      criterio "sin conocimiento del dominio → security".
 - [ ] Decidir convenciones de logging y manejo de errores (diferido a
       la primera feature real).

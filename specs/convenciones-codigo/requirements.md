@@ -23,6 +23,19 @@ improvisar la estructura entidad por entidad a medida que se escribe.
   wiring del router, middlewares transversales) DEBERÁ vivir en
   paquetes propios (p. ej. `internal/db`), separada de los paquetes de
   dominio.
+- Primitivas genéricas sin conocimiento del dominio (hash de password,
+  firma/verificación de JWT, generación de tokens opacos) DEBERÁN vivir
+  en `internal/security`, no dentro del paquete de dominio que las usa
+  primero — para que otro dominio futuro las reutilice sin depender de
+  ese paquete completo.
+- Dentro de un paquete de dominio, los archivos DEBERÁN seguir la
+  convención de nombres documentada en `design.md` (`models.go`,
+  `store.go`, `handlers.go`, etc.) cuando el contenido correspondiente
+  exista — no es obligatorio tener todos los archivos, sí usar el
+  nombre correcto para el que aplique.
+- La superficie exportada de un paquete de dominio DEBERÁ limitarse a
+  lo que otro paquete realmente necesita llamar; todo lo demás
+  permanece sin exportar.
 
 ### Linting
 

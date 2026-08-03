@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+
+	"github.com/jorgebuitragor/logday-server/internal/security"
 )
 
 // Bootstrap creates the first admin user from the ADMIN_EMAIL/
@@ -25,7 +27,7 @@ func Bootstrap(ctx context.Context, s *store) error {
 		return fmt.Errorf("no users exist yet: set ADMIN_EMAIL and ADMIN_PASSWORD to bootstrap the first admin")
 	}
 
-	hash, err := hashPassword(password)
+	hash, err := security.HashPassword(password)
 	if err != nil {
 		return fmt.Errorf("hashing admin password: %w", err)
 	}

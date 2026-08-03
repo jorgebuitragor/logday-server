@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/jorgebuitragor/logday-server/internal/security"
 )
 
 // Handler exposes the auth HTTP endpoints and the middleware (RequireAuth,
@@ -80,7 +82,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	match, err := verifyPassword(req.Password, u.PasswordHash)
+	match, err := security.VerifyPassword(req.Password, u.PasswordHash)
 	if err != nil || !match {
 		h.limiter.RecordFailure(limitKey)
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
@@ -93,7 +95,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		deviceName = "unknown device"
 	}
 
-	rawRefresh, refreshHash, err := generateRefreshToken()
+	rawRefresh, refreshHash, err := security.GenerateOpaqueToken()
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -129,7 +131,7 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hash := hashRefreshToken(req.RefreshToken)
+	hash := security.HashOpaqueToken(req.RefreshToken)
 
 	d, err := h.store.getDeviceByRefreshTokenHash(r.Context(), hash)
 	if err != nil {
@@ -154,7 +156,7 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newRaw, newHash, err := generateRefreshToken()
+	newRaw, newHash, err := security.GenerateOpaqueToken()
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -241,7 +243,7 @@ func (h *Handler) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hash, err := hashPassword(req.Password)
+	hash, err := security.HashPassword(req.Password)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
