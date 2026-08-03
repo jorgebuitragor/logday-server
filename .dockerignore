@@ -1,0 +1,6 @@
+.git
+.claude
+specs
+data
+*.db
+README.md

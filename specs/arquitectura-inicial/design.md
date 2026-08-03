@@ -26,7 +26,11 @@ velocidad de desarrollo ni ecosistema:
 - **Base de datos**: SQLite por defecto (archivo único, cero
   configuración), con la capa de acceso escrita para que Postgres sea
   intercambiable en instalaciones más grandes — `database/sql` +
-  `sqlc` en vez de un ORM pesado.
+  `sqlc` en vez de un ORM pesado. Driver: `mattn/go-sqlite3` (CGO) en
+  vez de `modernc.org/sqlite` (puro Go) — dado que CGO ya es
+  obligatorio en el build por `yrs` (ver más abajo), no hay motivo
+  para pagar el costo de rendimiento del driver puro Go solo para
+  evitar una dependencia CGO que de todas formas está presente.
 - **Migraciones**: `golang-migrate` o `goose`.
 - **WebSocket**: `nhooyr.io/websocket` o `gorilla/websocket`, para el
   requisito de sync en tiempo real.

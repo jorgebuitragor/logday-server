@@ -27,5 +27,8 @@ las decisiones pendientes en `requirements.md` se resuelvan.
 - [x] Decidir el orden de integración de clientes (desktop primero) y
       cómo convive temporalmente con el sync por git durante la
       transición (reemplazo directo, sin convivencia).
-- [ ] Una vez resuelto lo anterior: scaffold del repo (`go.mod`, `chi`,
-      SQLite, Dockerfile, `docker-compose.yml`).
+- [x] Una vez resuelto lo anterior: scaffold del repo (`go.mod`, `chi`,
+      SQLite, Dockerfile, `docker-compose.yml`). Validado end-to-end:
+      `docker compose up` levanta un binario estático (CGO+musl,
+      `mattn/go-sqlite3`) de ~25MB corriendo como usuario no-root, con
+      SQLite persistido en volumen y `/health` respondiendo 200.
