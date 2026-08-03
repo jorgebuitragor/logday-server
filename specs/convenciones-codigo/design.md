@@ -4,7 +4,7 @@ Estado: en diseño
 
 ## Estructura de paquetes: vertical por dominio
 
-```
+```text
 cmd/server/          entrypoint, wiring de router y servidor HTTP
 internal/db/         conexión SQLite/Postgres, compartida entre dominios
 internal/task/       (futuro) handler + lógica + acceso a datos de Task
@@ -47,7 +47,7 @@ permisos de directorio laxos).
 
 `Makefile`:
 
-```
+```text
 make build   # go build -o bin/server ./cmd/server
 make run     # go run ./cmd/server
 make test    # go test ./...

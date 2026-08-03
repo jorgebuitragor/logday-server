@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -9,12 +10,18 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/jorgebuitragor/logday-server/internal/auth"
 	"github.com/jorgebuitragor/logday-server/internal/db"
 )
 
 func main() {
 	addr := ":" + envOr("PORT", "8080")
 	dbPath := envOr("DATABASE_PATH", "./data/logday.db")
+
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		log.Fatal("JWT_SECRET must be set")
+	}
 
 	database, err := db.Open(dbPath)
 	if err != nil {
@@ -25,6 +32,18 @@ func main() {
 			log.Printf("closing database: %v", err)
 		}
 	}()
+
+	ctx := context.Background()
+
+	if err := db.Migrate(ctx, database); err != nil {
+		log.Fatalf("migrations: %v", err)
+	}
+
+	authStore := auth.NewStore(database)
+	if err := auth.Bootstrap(ctx, authStore); err != nil {
+		log.Fatalf("bootstrap: %v", err)
+	}
+	authHandler := auth.NewHandler(authStore, []byte(jwtSecret))
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -40,6 +59,8 @@ func main() {
 			log.Printf("writing health response: %v", err)
 		}
 	})
+
+	r.Mount("/", authHandler.Routes())
 
 	server := &http.Server{
 		Addr:              addr,

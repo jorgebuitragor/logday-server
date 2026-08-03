@@ -1,6 +1,6 @@
 # Auth multi-usuario — Requirements
 
-Estado: en diseño
+Estado: implementado (v1) — ver `design.md` y `tasks.md`
 
 ## Contexto
 

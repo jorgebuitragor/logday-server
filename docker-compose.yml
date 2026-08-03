@@ -5,6 +5,9 @@ services:
       - "8080:8080"
     environment:
       DATABASE_PATH: /data/logday.db
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in your .env}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     volumes:
       - logday-data:/data
     restart: unless-stopped
