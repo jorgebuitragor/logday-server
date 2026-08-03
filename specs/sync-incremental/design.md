@@ -1,6 +1,7 @@
 # Sync incremental — Diseño
 
-Estado: en diseño
+Estado: en progreso — `GET /sync/changes` implementado (ver
+`internal/sync/`), WS en tiempo real y CRDT siguen sin construir.
 
 ## Cursor: secuencia monótona por usuario
 
@@ -43,9 +44,9 @@ En los tres casos:
 
 ## Endpoint unificado
 
-`GET /sync/changes?since=<seq>` devuelve un array de cambios mezclados
-entre todas las entidades del usuario autenticado, cada uno con al
-menos:
+`GET /sync/changes?since=<seq>` (implementado en `internal/sync/`)
+devuelve un array de cambios mezclados entre todas las entidades del
+usuario autenticado, cada uno con al menos:
 
 ```json
 { "type": "task", "seq": 1042, "id": "...", "deleted": false, "updated_at": "...", "data": { ... } }
@@ -53,17 +54,39 @@ menos:
 
 Ordenados por `seq` ascendente. El cliente aplica cada uno en orden y
 actualiza su cursor local al `seq` del último elemento procesado.
+`since` es opcional — sin él (o `since=0`) trae todo el estado actual.
+
+**Arquitectura de `internal/sync`**: no tiene tabla propia. Su
+`store.go` hace fan-out a una función exportada por cada dominio
+sincronizable (hoy solo `task.ChangesSince(ctx, db, userID, since)`) y
+mezcla+ordena los resultados por `seq` — válido porque `seq` es un
+único contador por usuario compartido entre todas las entidades (ver
+arriba), no uno por tabla, así que los sub-resultados ya vienen
+ordenados y solo hace falta un merge. Agregar una entidad nueva
+(`note`, `overtime_entries`, ...) es agregar un bloque más en ese
+fan-out, no rediseñar el endpoint.
+
+`task.ChangesSince` es una función de paquete (no un método del
+`store` de `task`, que es privado) que toma `*sql.DB` directamente —
+así `internal/sync` no necesita nombrar el tipo privado `task.store`,
+solo pasar el `*sql.DB` que ya tiene. Ver
+`convenciones-codigo/design.md` para el razonamiento completo de por
+qué se eligió este patrón en vez de una interfaz `Source` genérica
+(prematuro con una sola entidad real).
 
 ## Tombstones y purga
 
 - Soft-delete: se setea `deleted_at`, la fila no se borra hasta la
-  purga.
+  purga. Ya expuesto en `GET /sync/changes` (`deleted: true`),
+  validado end-to-end.
 - Un job periódico elimina físicamente los tombstones con `deleted_at`
-  de más de 90 días.
-- El servidor mantiene el `seq` mínimo vigente (el del tombstone no
-  purgado más antiguo). Si `since` es menor a ese mínimo, responde
-  `410 Gone` con un cuerpo indicando "cursor expirado, hacer full
-  resync".
+  de más de 90 días — **no implementado todavía**.
+- El servidor DEBERÍA mantener el `seq` mínimo vigente (el del
+  tombstone no purgado más antiguo) y responder `410 Gone` si `since`
+  es menor a ese mínimo — **no implementado todavía**, a propósito:
+  sin el job de purga, un cursor nunca puede quedar realmente
+  inválido, así que construir el chequeo ahora sería código sin forma
+  de probarse honestamente. Se construye junto con la purga.
 - Full resync = mismo endpoint sin `since` (o `since=0`): trae todo el
   estado actual no borrado.
 

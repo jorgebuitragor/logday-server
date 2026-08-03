@@ -12,6 +12,7 @@ import (
 
 	"github.com/jorgebuitragor/logday-server/internal/auth"
 	"github.com/jorgebuitragor/logday-server/internal/db"
+	"github.com/jorgebuitragor/logday-server/internal/sync"
 	"github.com/jorgebuitragor/logday-server/internal/task"
 )
 
@@ -49,6 +50,9 @@ func main() {
 	taskStore := task.NewStore(database)
 	taskHandler := task.NewHandler(taskStore, authHandler)
 
+	syncStore := sync.NewStore(database)
+	syncHandler := sync.NewHandler(syncStore, authHandler)
+
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -66,6 +70,7 @@ func main() {
 
 	authHandler.Routes(r)
 	taskHandler.Routes(r)
+	syncHandler.Routes(r)
 
 	server := &http.Server{
 		Addr:              addr,

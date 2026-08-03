@@ -19,5 +19,13 @@ Estado: en diseño
       `internal/security` (hash de password, JWT, tokens opacos) —
       aplicado retroactivamente sobre auth, primer caso real del
       criterio "sin conocimiento del dominio → security".
+- [x] Decidir patrón de `internal/sync` (agregador vía `ChangesSince`
+      exportada por cada dominio, no una interfaz `Source` genérica —
+      ver design.md).
+- [x] Corregir convención de `Routes()`: `Routes(r chi.Router)`
+      registrando sobre el router del caller, no `Routes() chi.Router`
+      devolviendo un sub-router — `chi.Mount` hace panic si dos
+      routers se montan en el mismo path (bug real encontrado al
+      integrar `task` junto a `auth`).
 - [ ] Decidir convenciones de logging y manejo de errores (diferido a
       la primera feature real).

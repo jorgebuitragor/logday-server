@@ -25,8 +25,8 @@ func newTestStore(t *testing.T) *store {
 	return NewStore(database)
 }
 
-func sampleTask(userID string, updatedAt time.Time) *task {
-	return &task{
+func sampleTask(userID string, updatedAt time.Time) *Task {
+	return &Task{
 		ID:        "task-1",
 		UserID:    userID,
 		Title:     "Write the sync protocol",

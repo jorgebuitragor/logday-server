@@ -49,36 +49,12 @@ type taskRequest struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-type taskResponse struct {
-	ID          string     `json:"id"`
-	Title       string     `json:"title"`
-	TaskCode    *string    `json:"task_code,omitempty"`
-	Status      string     `json:"status"`
-	Tags        []string   `json:"tags"`
-	Project     string     `json:"project"`
-	Created     string     `json:"created"`
-	CompletedAt *string    `json:"completed_at,omitempty"`
-	Due         *string    `json:"due,omitempty"`
-	Content     string     `json:"content"`
-	Seq         int64      `json:"seq"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-	DeletedAt   *time.Time `json:"deleted_at,omitempty"`
-}
-
-func toTaskResponse(t task) taskResponse {
-	return taskResponse{
-		ID: t.ID, Title: t.Title, TaskCode: t.TaskCode, Status: t.Status, Tags: t.Tags,
-		Project: t.Project, Created: t.Created, CompletedAt: t.CompletedAt, Due: t.Due,
-		Content: t.Content, Seq: t.Seq, UpdatedAt: t.UpdatedAt, DeletedAt: t.DeletedAt,
-	}
-}
-
-func (req taskRequest) toTask(userID string) task {
+func (req taskRequest) toTask(userID string) Task {
 	tags := req.Tags
 	if tags == nil {
 		tags = []string{}
 	}
-	return task{
+	return Task{
 		ID: req.ID, UserID: userID, Title: req.Title, TaskCode: req.TaskCode,
 		Status: req.Status, Tags: tags, Project: req.Project, Created: req.Created,
 		CompletedAt: req.CompletedAt, Due: req.Due, Content: req.Content, UpdatedAt: req.UpdatedAt,
@@ -139,7 +115,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	h.upsert(w, r, &t)
 }
 
-func (h *Handler) upsert(w http.ResponseWriter, r *http.Request, t *task) {
+func (h *Handler) upsert(w http.ResponseWriter, r *http.Request, t *Task) {
 	stored, err := h.store.upsertTask(r.Context(), t)
 	if err != nil {
 		switch {
@@ -152,7 +128,7 @@ func (h *Handler) upsert(w http.ResponseWriter, r *http.Request, t *task) {
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, toTaskResponse(*stored))
+	writeJSON(w, http.StatusOK, stored)
 }
 
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
@@ -181,10 +157,8 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-
-	out := make([]taskResponse, 0, len(tasks))
-	for _, t := range tasks {
-		out = append(out, toTaskResponse(t))
+	if tasks == nil {
+		tasks = []Task{}
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, tasks)
 }

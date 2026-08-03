@@ -9,9 +9,9 @@ cmd/server/          entrypoint, wiring de router y servidor HTTP
 internal/db/         conexión SQLite/Postgres + migraciones (goose), compartida entre dominios
 internal/security/   primitivas criptográficas genéricas (hash de password, JWT, tokens opacos) — sin lógica de negocio
 internal/auth/       users/devices/sesiones: handlers, store, bootstrap del admin
-internal/task/       (futuro) handler + lógica + acceso a datos de Task
+internal/task/       handlers, store y ChangesSince (exportada) de Task
+internal/sync/       fan-out a ChangesSince de cada dominio + GET /sync/changes
 internal/note/       (futuro) ídem para Note
-internal/sync/       (futuro) ídem para el endpoint /sync/changes y WS
 ...
 ```
 
@@ -37,6 +37,36 @@ va en `security`. Si conoce la forma de las entidades del dominio (p.
 ej. los claims concretos `{UserID, DeviceID, IsAdmin}` de un access
 token), se queda en el paquete de dominio, que arma esos claims y
 llama a `security.SignJWT`/`security.ParseJWT`.
+
+### `internal/sync`: agregador, no otro dominio más
+
+`internal/sync` no encaja en "un paquete por dominio" porque no tiene
+tabla propia ni entidad propia — su trabajo es leer de las tablas de
+*otros* dominios para armar `GET /sync/changes`. Patrón elegido:
+
+- Cada dominio sincronizable expone una **función de paquete**
+  exportada (no un método de su `store`, que es privado):
+  `func ChangesSince(ctx context.Context, db *sql.DB, userID string, since int64) ([]Task, error)`
+  en `internal/task`. Toma `*sql.DB` directamente en vez de un
+  `*store` — así el paquete llamador no necesita nombrar un tipo
+  privado de otro paquete (Go no lo permite: se puede *usar* un valor
+  de tipo no exportado obtenido por inferencia, pero no se puede
+  *escribir* su nombre de tipo en otro paquete — p. ej. como campo de
+  struct o firma de interfaz — bloqueando cualquier variante donde
+  `sync` intentara guardarse una referencia tipada al `store` de
+  `task`).
+- `internal/sync` importa cada dominio directamente y llama a su
+  `ChangesSince` (hoy solo `task.ChangesSince`), en vez de una
+  interfaz `Source` genérica con auto-registro. Se descartó la
+  interfaz genérica por prematura: con una sola entidad real no hay
+  nada que generalizar todavía; agregar la segunda (`note`) es agregar
+  un bloque más en `sync/store.go`, no una migración de arquitectura.
+  Reconsiderar si con 3-4 entidades el fan-out se vuelve repetitivo.
+- Los resultados de cada `ChangesSince` ya vienen ordenados por `seq`
+  (cada uno pide `ORDER BY seq ASC` a su propia tabla); `sync` solo
+  hace merge + sort final, válido porque `seq` es un único contador
+  por usuario compartido entre todas las entidades
+  (`internal/db.NextSeq`), no uno por tabla.
 
 El store SQL de cada dominio (`store.go`) no se extrae de forma
 parecida: sus queries son inherentemente específicas de las tablas de

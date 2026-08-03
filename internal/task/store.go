@@ -29,7 +29,7 @@ func NewStore(sqlDB *sql.DB) *store {
 // upsertTask creates t or, if a task with t.ID already exists, updates
 // it — provided t belongs to the same user and t.UpdatedAt is newer
 // than what's stored (LWW by whole row, see specs/sync-incremental).
-func (s *store) upsertTask(ctx context.Context, t *task) (*task, error) {
+func (s *store) upsertTask(ctx context.Context, t *Task) (*Task, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("beginning transaction: %w", err)
@@ -137,7 +137,7 @@ func (s *store) softDelete(ctx context.Context, id, userID string) error {
 	return nil
 }
 
-func (s *store) listTasks(ctx context.Context, userID string) ([]task, error) {
+func (s *store) listTasks(ctx context.Context, userID string) ([]Task, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, user_id, title, task_code, status, tags, project, created, completed_at, due, content, seq, updated_at, deleted_at
 		FROM tasks WHERE user_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC
@@ -147,7 +147,7 @@ func (s *store) listTasks(ctx context.Context, userID string) ([]task, error) {
 	}
 	defer func() { _ = rows.Close() }()
 
-	var tasks []task
+	var tasks []Task
 	for rows.Next() {
 		t, err := scanTask(rows)
 		if err != nil {
@@ -161,31 +161,60 @@ func (s *store) listTasks(ctx context.Context, userID string) ([]task, error) {
 	return tasks, nil
 }
 
-func scanTask(row *sql.Rows) (task, error) {
-	var t task
+// ChangesSince returns every task belonging to userID with seq > since
+// (including soft-deleted ones, as tombstones), ordered by seq — the
+// feed internal/sync merges into the unified GET /sync/changes
+// response. Takes a raw *sql.DB instead of going through the
+// unexported store type, so sync doesn't need to name it.
+func ChangesSince(ctx context.Context, sqlDB *sql.DB, userID string, since int64) ([]Task, error) {
+	rows, err := sqlDB.QueryContext(ctx, `
+		SELECT id, user_id, title, task_code, status, tags, project, created, completed_at, due, content, seq, updated_at, deleted_at
+		FROM tasks WHERE user_id = ? AND seq > ? ORDER BY seq ASC
+	`, userID, since)
+	if err != nil {
+		return nil, fmt.Errorf("querying task changes: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var tasks []Task
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating task changes: %w", err)
+	}
+	return tasks, nil
+}
+
+func scanTask(row *sql.Rows) (Task, error) {
+	var t Task
 	var tags, updatedAt string
 	var deletedAt sql.NullString
 	if err := row.Scan(
 		&t.ID, &t.UserID, &t.Title, &t.TaskCode, &t.Status, &tags, &t.Project,
 		&t.Created, &t.CompletedAt, &t.Due, &t.Content, &t.Seq, &updatedAt, &deletedAt,
 	); err != nil {
-		return task{}, fmt.Errorf("scanning task: %w", err)
+		return Task{}, fmt.Errorf("scanning task: %w", err)
 	}
 
 	if err := json.Unmarshal([]byte(tags), &t.Tags); err != nil {
-		return task{}, fmt.Errorf("decoding tags: %w", err)
+		return Task{}, fmt.Errorf("decoding tags: %w", err)
 	}
 
 	updated, err := parseTime(updatedAt)
 	if err != nil {
-		return task{}, err
+		return Task{}, err
 	}
 	t.UpdatedAt = updated
 
 	if deletedAt.Valid {
 		d, err := parseTime(deletedAt.String)
 		if err != nil {
-			return task{}, err
+			return Task{}, err
 		}
 		t.DeletedAt = &d
 	}
