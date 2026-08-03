@@ -1,7 +1,7 @@
 # Arquitectura inicial — Diseño
 
-Estado: en diseño (decisiones de stack tomadas; protocolo de sync y
-resolución de conflictos pendientes — ver `requirements.md`)
+Estado: en diseño (decisiones de stack y de resolución de conflictos
+tomadas; protocolo de sync pendiente — ver `requirements.md`)
 
 ## Stack: Go
 
@@ -98,12 +98,70 @@ Casos particulares al migrar del formato archivo a tabla:
   Task/Note, o si pasan a ser una entidad propia con `id` (facilita
   renombrar/mover sin reescribir hijos).
 
+## Resolución de conflictos
+
+Estrategia mixta (ver `requirements.md`):
+
+- **LWW por campo** para todo campo que no sea texto largo (status,
+  fechas, números, booleanos, etc.) — cada campo compara su propio
+  `updated_at`, no el del registro completo, para que ediciones
+  concurrentes a campos distintos no se pisen entre sí.
+- **CRDT acotado a texto largo**: solo `Note.content` y
+  `daily_entries.content`. Es el único caso donde perder texto escrito
+  offline en dos dispositivos es un riesgo real y donde un merge
+  automático (en vez de "gana el más reciente") tiene sentido. No se
+  extiende a otros campos sin decisión explícita.
+
+### Librería e implementación: `yrs` vía CGO
+
+- **Librería**: [`yrs`](https://github.com/y-crdt/y-crdt) — puerto en
+  Rust de Yjs, mantenido por el mismo equipo, con bindings C oficiales
+  (`yffi`/`libyrs`) pensados para consumirse desde otros lenguajes.
+- **Rol del servidor**: no es un relay 100% opaco. El servidor Go
+  consume `libyrs` vía CGO para poder compactar el log de updates en
+  un snapshot periódicamente (sin compactación, el log crece sin
+  límite — cada edición de texto genera un update). El merge de
+  negocio del contenido sigue ocurriendo con la misma librería CRDT,
+  no con lógica propia del servidor.
+- **Por qué CGO y no WASM**: se evaluó correr `yrs` compilado a WASM
+  vía `wazero` (runtime WASM puro Go, sin CGO) para mantener
+  cross-compilación trivial. Se descartó porque no existe un target
+  WASM oficial para `yffi` pensado para consumirse desde Go — tocaría
+  compilarlo y mantenerlo a mano, con más riesgo que beneficio. CGO
+  usa el artefacto oficial, con llamadas nativas y sin el overhead de
+  marshaling a través de memoria lineal WASM.
+- **Costo aceptado**: CGO complica la cross-compilación para
+  Raspberry Pi/ARM (un target explícito del proyecto) porque ya no
+  alcanza con `GOOS`/`GOARCH` — hace falta un toolchain C por
+  arquitectura. Se resuelve con `docker buildx` + el helper
+  [`tonistiigi/xx`](https://github.com/tonistiigi/xx) en el Dockerfile
+  multi-stage, un patrón estándar para cross-compilar binarios Go con
+  CGO por plataforma.
+
+## Integración de clientes y transición desde git
+
+- **Orden**: desktop (`task-manager`) primero — es el único cliente
+  que existe hoy con usuarios reales, y es el que necesita la
+  transición desde el sync por git. Validar el protocolo completo
+  contra un cliente y datos reales antes de invertir en clientes
+  nuevos (web/móvil/extensión).
+- **Transición**: reemplazo directo, no convivencia. El sync por git
+  sigue intacto para quien no configure un servidor; configurar uno lo
+  desactiva para ese usuario — coherente con que la API reemplaza el
+  sync por git a largo plazo (`requirements.md`), no un sistema
+  paralelo indefinido.
+- No hace falta un import especial del historial de git: por la
+  filosofía local-first, el cliente ya tiene su estado actual completo
+  en disco. Configurar un servidor por primera vez es simplemente el
+  primer push de ese estado actual vía el protocolo de
+  [`sync-incremental`](../sync-incremental/design.md) — no un caso
+  especial de migración.
+
 ## Explícitamente pendiente (specs futuros)
 
-- Protocolo de sync detallado (formato de cursor/endpoint de "cambios
-  desde X", payloads de WebSocket).
-- Estrategia de resolución de conflictos — ver `requirements.md`, sin
-  decidir todavía entre last-write-wins u otra alternativa más precisa.
+- Protocolo de sync incremental — ver
+  [`sync-incremental/`](../sync-incremental/requirements.md).
+- Payloads de WebSocket para tiempo real.
 - Esquema de auth completo (tablas `users`, `devices`/`sessions`).
 - Esquema de datos completo tabla por tabla.
 - Migración de usuarios existentes del sync por git.

@@ -59,29 +59,27 @@ para múltiples clientes de Logday (desktop, web, móvil, extensión).
   reconectar, usando el mismo mecanismo de sync incremental que usaría
   un cliente en tiempo real (no un sistema paralelo).
 
-### Resolución de conflictos — PENDIENTE DE DECISIÓN
+### Resolución de conflictos
 
-- El sistema DEBERÁ definir una estrategia de resolución de conflictos
-  antes de implementar el protocolo de sync. Opciones a evaluar (ninguna
-  descartada ni elegida todavía):
-  - **Last-write-wins** (por registro o por campo): simple de
-    implementar, pero con riesgo real de pérdida silenciosa de cambios
-    cuando dos dispositivos editan lo mismo mientras ambos están
-    offline.
-  - **Alternativas más precisas y de menor riesgo**: p. ej. versionado
-    con detección de conflicto explícita (el cliente sabe que su cambio
-    pisa uno más reciente y puede decidir), merge por campo en vez de
-    por registro completo, o algún esquema tipo vector clocks / CRDT
-    acotado a los campos que realmente lo justifiquen.
-- Esta decisión condiciona el diseño del protocolo de sync (siguiente
-  spec) y no debe asumirse implícitamente al implementar.
+- El sistema DEBERÁ resolver conflictos de campos simples (status,
+  fechas, números, booleanos, y cualquier campo no listado como texto
+  largo) mediante **last-write-wins por campo**, no por registro
+  completo — dos ediciones concurrentes a campos distintos del mismo
+  registro DEBERÁN sobrevivir ambas.
+- El sistema DEBERÁ resolver conflictos en campos de texto largo
+  (`Note.content`, `daily_entries.content`) mediante **CRDT**, para que
+  ediciones concurrentes de texto en distintos dispositivos se
+  mezclen en vez de que una pise a la otra. Ver `design.md` para la
+  librería y el rol del servidor en este mecanismo.
+- Ningún otro campo DEBERÁ usar CRDT salvo que se agregue
+  explícitamente a la lista de campos de texto largo — el alcance se
+  mantiene acotado a propósito (ver `design.md`, "Mapeo de datos").
 
 ## Fuera de este spec (para specs futuros)
 
-- Protocolo de sync detallado (formato de cursor, forma de los
-  endpoints, payloads de WebSocket).
-- Estrategia de resolución de conflictos (ver arriba — pendiente).
+- Protocolo de sync incremental detallado — ver
+  [`sync-incremental/`](../sync-incremental/requirements.md).
+- Payloads de WebSocket para tiempo real.
 - Esquema de datos completo tabla por tabla.
 - Esquema de auth (usuarios, dispositivos, tokens).
-- Migración de usuarios existentes del sync por git hacia esta API.
-- Orden de integración de clientes (cuál consume la API primero).
+- Detalle de UI/flujo de "conectar servidor" en el cliente desktop.

@@ -38,3 +38,6 @@ tres archivos:
 | Feature | Estado | Carpeta |
 |---|---|---|
 | Arquitectura inicial | en diseño | [`arquitectura-inicial/`](./arquitectura-inicial/requirements.md) |
+| Sync incremental | en diseño | [`sync-incremental/`](./sync-incremental/requirements.md) |
+| Auth multi-usuario | en diseño | [`auth-multiusuario/`](./auth-multiusuario/requirements.md) |
+| Esquema de datos | en diseño | [`esquema-datos/`](./esquema-datos/requirements.md) |
