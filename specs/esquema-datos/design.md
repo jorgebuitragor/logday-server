@@ -1,8 +1,12 @@
 # Esquema de datos — Diseño
 
-Estado: en diseño (`tasks` y `notes` implementadas — ver
-`internal/task/`, `internal/note/`; las otras 5 tablas siguen solo
-diseñadas)
+Estado: implementado — las 7 tablas existen y tienen su paquete de
+dominio (`internal/task/`, `internal/note/`, `internal/overtime/`,
+`internal/calendar/`, `internal/absence/`, `internal/dailyentry/`).
+Índices más allá de `(user_id, seq)` siguen sin definirse (no
+bloqueante). `notes.content` y `daily_entries.content` usan la
+simplificación LWW por fila en vez de CRDT — ver
+`arquitectura-inicial/requirements.md`.
 
 ## Convenciones generales
 
@@ -45,12 +49,14 @@ diseñadas)
 | created | DATE | |
 | completed_at | DATE NULL | |
 | due | DATE NULL | |
-| content | TEXT | markdown, LWW por campo (no CRDT) |
+| content | TEXT | markdown, LWW por fila completa (ver limitación v1) |
 | seq | INTEGER | |
 | updated_at | TIMESTAMPTZ | |
 | deleted_at | TIMESTAMPTZ NULL | |
 
-Excluidos: `filePath`, `linked_paths`.
+Excluidos: `filePath`, `linked_paths`. Implementada — ver
+`internal/task/` y
+`internal/db/migrations/00005_create_tasks.sql`.
 
 ### `notes`
 
@@ -84,6 +90,11 @@ Excluido: `filePath`.
 
 ### `overtime_entries`
 
+Implementada — ver `internal/overtime/` (junto con `overtime_month_meta`,
+mismo paquete de dominio: son el mismo concepto de negocio repartido
+en dos tablas) y
+`internal/db/migrations/00007_create_overtime_entries.sql`.
+
 | Columna | Tipo | Notas |
 |---|---|---|
 | id | TEXT (UUID) | PK |
@@ -105,9 +116,15 @@ Excluido: `filePath`.
 
 ### `overtime_month_meta`
 
+Implementada — ver `internal/overtime/` y
+`internal/db/migrations/00008_create_overtime_month_meta.sql`.
 Metadata por mes (`colaborador`, `cédula`), no por entrada — hoy no
 tiene id propio en el tipo TS, así que se usa `(user_id, year_month)`
-como clave natural.
+como clave natural. `year_month` es el URL param en REST
+(`PUT /overtime-month-meta/:yearMonth`, sin `POST` — a diferencia de
+las entidades con id propio, el recurso ya se identifica por su clave
+natural desde el inicio, así que upsert-por-URL alcanza) y el `id`
+sintético en `/sync/changes`.
 
 | Columna | Tipo | Notas |
 |---|---|---|
@@ -121,13 +138,18 @@ como clave natural.
 
 ### `calendar_events`
 
+Implementada — ver `internal/calendar/` y
+`internal/db/migrations/00009_create_calendar_events.sql`. `time` es
+`TEXT NOT NULL DEFAULT ''` (no `NULL`) — `''` significa "todo el día",
+igual que el tipo TS de referencia (`time: string`, no opcional).
+
 | Columna | Tipo | Notas |
 |---|---|---|
 | id | TEXT (UUID) | PK |
 | user_id | TEXT | FK |
 | title | TEXT | |
 | date | DATE | |
-| time | TEXT (HH:MM) NULL | vacío/NULL = todo el día |
+| time | TEXT | `''` = todo el día |
 | description | TEXT | |
 | color | TEXT CHECK IN ('indigo','amber','emerald','rose','sky','violet') | |
 | reminder_minutes | INTEGER | 0 = sin recordatorio |
@@ -137,6 +159,9 @@ como clave natural.
 | deleted_at | TIMESTAMPTZ NULL | |
 
 ### `absence_days`
+
+Implementada — ver `internal/absence/` y
+`internal/db/migrations/00010_create_absence_days.sql`.
 
 | Columna | Tipo | Notas |
 |---|---|---|
@@ -151,25 +176,28 @@ como clave natural.
 
 ### `daily_entries`
 
-Hoy en el cliente es `Record<date,string>` (un archivo `.md` por mes,
-sin campos extra más allá de fecha + texto libre — confirmado leyendo
-`appStore.ts` y `dailyFileFormat.ts`). Clave natural `(user_id, date)`,
-sin id propio.
+Implementada — ver `internal/dailyentry/` y
+`internal/db/migrations/00011_create_daily_entries.sql`. Misma
+desviación deliberada que `notes`: `content` es `TEXT` plano (LWW por
+fila), no `content_crdt BLOB` todavía — ver nota en `notes` arriba y
+`arquitectura-inicial/tasks.md` para el seguimiento de CRDT. Clave
+natural `(user_id, date)`, sin id propio — mismo patrón de rutas que
+`overtime_month_meta` (`PUT /daily-entries/:date`, sin `POST`).
 
 | Columna | Tipo | Notas |
 |---|---|---|
 | user_id | TEXT | FK, parte de PK compuesta |
 | date | DATE | parte de PK compuesta; actúa como `id` sintético en el endpoint de cambios |
-| content_crdt | BLOB | estado CRDT (`yrs`) |
+| content | TEXT | **interino**: LWW por fila, no CRDT |
 | seq | INTEGER | |
 | updated_at | TIMESTAMPTZ | |
 | deleted_at | TIMESTAMPTZ NULL | |
 
 ## Explícitamente pendiente
 
-- Migraciones concretas (`golang-migrate`/`goose`, ya decidido en
-  `arquitectura-inicial`, falta escribirlas).
-- Índices (mínimo esperable: `(user_id, seq)` en cada tabla para el
-  endpoint de cambios, pero no se define aquí el detalle final).
-- Formato exacto del payload CRDT dentro de `content_crdt` y de cómo
-  viaja en el endpoint de cambios — ver `sync-incremental/design.md`.
+- Índices más allá de `(user_id, seq)` (ya presente en las 7 tablas)
+  — no se ha identificado ningún patrón de consulta que lo necesite
+  todavía.
+- Formato exacto del payload CRDT dentro de `content`/`content_crdt` y
+  de cómo viaja en el endpoint de cambios, para cuando se resuelva el
+  seguimiento de CRDT — ver `sync-incremental/design.md`.

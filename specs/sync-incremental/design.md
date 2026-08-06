@@ -58,9 +58,12 @@ actualiza su cursor local al `seq` del último elemento procesado.
 
 **Arquitectura de `internal/sync`**: no tiene tabla propia. Su
 `store.go` hace fan-out a una función exportada por cada dominio
-sincronizable (hoy solo `task.ChangesSince(ctx, db, userID, since)`) y
-mezcla+ordena los resultados por `seq` — válido porque `seq` es un
-único contador por usuario compartido entre todas las entidades (ver
+sincronizable — las 7 entidades implementadas (`task`, `note`,
+`overtime` entries + month-meta, `calendar`, `absence`,
+`dailyentry`) — vía un helper genérico `addChanges` (ver
+`convenciones-codigo/design.md`), y mezcla+ordena los resultados por
+`seq` — válido porque `seq` es un único contador por usuario
+compartido entre todas las entidades (ver
 arriba), no uno por tabla, así que los sub-resultados ya vienen
 ordenados y solo hace falta un merge. Agregar una entidad nueva
 (`note`, `overtime_entries`, ...) es agregar un bloque más en ese

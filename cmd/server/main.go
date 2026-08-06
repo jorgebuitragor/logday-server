@@ -10,9 +10,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/jorgebuitragor/logday-server/internal/absence"
 	"github.com/jorgebuitragor/logday-server/internal/auth"
+	"github.com/jorgebuitragor/logday-server/internal/calendar"
+	"github.com/jorgebuitragor/logday-server/internal/dailyentry"
 	"github.com/jorgebuitragor/logday-server/internal/db"
 	"github.com/jorgebuitragor/logday-server/internal/note"
+	"github.com/jorgebuitragor/logday-server/internal/overtime"
 	"github.com/jorgebuitragor/logday-server/internal/sync"
 	"github.com/jorgebuitragor/logday-server/internal/task"
 )
@@ -54,6 +58,18 @@ func main() {
 	noteStore := note.NewStore(database)
 	noteHandler := note.NewHandler(noteStore, authHandler)
 
+	overtimeStore := overtime.NewStore(database)
+	overtimeHandler := overtime.NewHandler(overtimeStore, authHandler)
+
+	calendarStore := calendar.NewStore(database)
+	calendarHandler := calendar.NewHandler(calendarStore, authHandler)
+
+	absenceStore := absence.NewStore(database)
+	absenceHandler := absence.NewHandler(absenceStore, authHandler)
+
+	dailyEntryStore := dailyentry.NewStore(database)
+	dailyEntryHandler := dailyentry.NewHandler(dailyEntryStore, authHandler)
+
 	syncStore := sync.NewStore(database)
 	syncHandler := sync.NewHandler(syncStore, authHandler)
 
@@ -75,6 +91,10 @@ func main() {
 	authHandler.Routes(r)
 	taskHandler.Routes(r)
 	noteHandler.Routes(r)
+	overtimeHandler.Routes(r)
+	calendarHandler.Routes(r)
+	absenceHandler.Routes(r)
+	dailyEntryHandler.Routes(r)
 	syncHandler.Routes(r)
 
 	server := &http.Server{

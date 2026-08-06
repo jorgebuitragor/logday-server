@@ -11,8 +11,11 @@ internal/security/   primitivas criptográficas genéricas (hash de password, JW
 internal/auth/       users/devices/sesiones: handlers, store, bootstrap del admin
 internal/task/       handlers, store y ChangesSince (exportada) de Task
 internal/note/       ídem para Note (content aún TEXT plano, no CRDT — ver arquitectura-inicial)
+internal/overtime/   ídem para OvertimeEntry y OvertimeMonthMeta (dos tablas, un dominio)
+internal/calendar/   ídem para CalendarEvent
+internal/absence/    ídem para AbsenceDay
+internal/dailyentry/ ídem para DailyEntry (content aún TEXT plano, no CRDT)
 internal/sync/       fan-out a ChangesSince de cada dominio + GET /sync/changes
-...
 ```
 
 Cada paquete de dominio es autocontenido: su propio archivo de
@@ -56,12 +59,18 @@ tabla propia ni entidad propia — su trabajo es leer de las tablas de
   `sync` intentara guardarse una referencia tipada al `store` de
   `task`).
 - `internal/sync` importa cada dominio directamente y llama a su
-  `ChangesSince` (hoy solo `task.ChangesSince`), en vez de una
-  interfaz `Source` genérica con auto-registro. Se descartó la
-  interfaz genérica por prematura: con una sola entidad real no hay
-  nada que generalizar todavía; agregar la segunda (`note`) es agregar
-  un bloque más en `sync/store.go`, no una migración de arquitectura.
-  Reconsiderar si con 3-4 entidades el fan-out se vuelve repetitivo.
+  `ChangesSince`, en vez de una interfaz `Source` genérica con
+  auto-registro. Se descartó la interfaz genérica por prematura: con
+  una sola entidad real no había nada que generalizar todavía.
+  **Reconsiderado al llegar a 7 entidades** (el umbral que este mismo
+  documento marcaba): se agregó un helper genérico `addChanges[T any]`
+  en `sync/store.go` que toma funciones accessor (`id func(T) string`,
+  `seq func(T) int64`, etc.) en vez de una interfaz que cada tipo de
+  dominio tendría que implementar — evita tocar cada paquete de
+  dominio solo para satisfacer una interfaz de conveniencia de `sync`,
+  y funciona igual de bien con los dos casos de clave natural
+  (`overtime.MonthMeta.YearMonth`, `dailyentry.Entry.Date`) que con
+  los de id propio, sin necesitar un campo `ID` uniforme.
 - Los resultados de cada `ChangesSince` ya vienen ordenados por `seq`
   (cada uno pide `ORDER BY seq ASC` a su propia tabla); `sync` solo
   hace merge + sort final, válido porque `seq` es un único contador
@@ -89,6 +98,18 @@ paquete de dominio nuevo (`task`, `note`, `sync`...) se sienta igual:
 | `helpers.go` | Utilidades HTTP privadas del dominio (`writeJSON`, `clientIP`, etc.) — no confundir con `internal/security`, que es para crypto genérica, no HTTP. |
 | `bootstrap.go` | Solo si el dominio necesita inicialización especial al arrancar el servidor (hoy únicamente `auth`, para el primer admin). |
 | `ratelimit.go`, `tokens.go`, ... | Archivos ad hoc para conceptos propios del dominio que no encajan en lo anterior — no es una lista cerrada. |
+
+### Entidades sin id propio: solo `PUT`, sin `POST`
+
+`overtime_month_meta` y `daily_entries` no tienen id generado por el
+cliente — su clave natural (`year_month`, `date`) se conoce desde el
+inicio. Para esas, el patrón REST es solo
+`PUT /<recurso>/:clave-natural` (upsert-por-URL) +
+`DELETE /<recurso>/:clave-natural` + `GET /<recurso>` (lista) — sin
+`POST`, porque no hay ambigüedad de "crear vs. editar" que justifique
+el verbo aparte (a diferencia de `task`/`note`/etc., donde el `id` va
+en el body de un `POST` porque no hay otra forma de que el servidor lo
+conozca antes de la primera escritura).
 
 La superficie exportada de cada paquete de dominio se mantiene mínima
 a propósito: solo lo que otro paquete (`cmd/server` u otro dominio)

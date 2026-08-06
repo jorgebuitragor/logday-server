@@ -112,3 +112,42 @@ func TestChangesSinceIsScopedToUser(t *testing.T) {
 		t.Fatalf("expected only user-1's task, got %+v", changes)
 	}
 }
+
+// TestChangesSinceUsesNaturalKeyAsID covers the two entities without a
+// client-generated id (overtime_month_meta, daily_entries) — their
+// change envelope should use the natural key (year_month, date) as
+// the synthetic id, per specs/esquema-datos.
+func TestChangesSinceUsesNaturalKeyAsID(t *testing.T) {
+	s, database := newTestStore(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := database.Exec(`
+		INSERT INTO overtime_month_meta (user_id, year_month, colaborador, cedula, seq, updated_at)
+		VALUES ('user-1', '2026-08', 'Jane Doe', '123456', 1, ?)
+	`, now)
+	if err != nil {
+		t.Fatalf("inserting overtime_month_meta fixture: %v", err)
+	}
+	_, err = database.Exec(`
+		INSERT INTO daily_entries (user_id, date, content, seq, updated_at)
+		VALUES ('user-1', '2026-08-05', 'worked on sync', 2, ?)
+	`, now)
+	if err != nil {
+		t.Fatalf("inserting daily_entries fixture: %v", err)
+	}
+
+	changes, err := s.changesSince(ctx, "user-1", 0)
+	if err != nil {
+		t.Fatalf("changesSince: %v", err)
+	}
+	if len(changes) != 2 {
+		t.Fatalf("expected 2 changes, got %d: %+v", len(changes), changes)
+	}
+	if changes[0].Type != "overtime_month_meta" || changes[0].ID != "2026-08" {
+		t.Fatalf("changes[0] = %+v, want type overtime_month_meta id 2026-08", changes[0])
+	}
+	if changes[1].Type != "daily_entry" || changes[1].ID != "2026-08-05" {
+		t.Fatalf("changes[1] = %+v, want type daily_entry id 2026-08-05", changes[1])
+	}
+}
