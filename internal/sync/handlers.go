@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -44,6 +45,10 @@ func (h *Handler) changes(w http.ResponseWriter, r *http.Request) {
 
 	changes, err := h.store.changesSince(r.Context(), userID, since)
 	if err != nil {
+		if errors.Is(err, errCursorInvalid) {
+			http.Error(w, "cursor is no longer valid, perform a full resync (retry without since)", http.StatusGone)
+			return
+		}
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}

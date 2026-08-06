@@ -1,8 +1,9 @@
 # Sync incremental — Diseño
 
-Estado: en progreso — `GET /sync/changes` y el WebSocket de tiempo
-real implementados (ver `internal/sync/`, `internal/realtime/`); CRDT
-sigue sin construir.
+Estado: en progreso — `GET /sync/changes`, el WebSocket de tiempo real
+y la purga de tombstones con invalidación de cursor (`410`)
+implementados (ver `internal/sync/`, `internal/realtime/`,
+`internal/db/purge.go`); CRDT y paginación siguen sin construir.
 
 ## Cursor: secuencia monótona por usuario
 
@@ -80,17 +81,31 @@ qué se eligió este patrón en vez de una interfaz `Source` genérica
 
 ## Tombstones y purga
 
+Implementado — ver `internal/db/purge.go`.
+
 - Soft-delete: se setea `deleted_at`, la fila no se borra hasta la
-  purga. Ya expuesto en `GET /sync/changes` (`deleted: true`),
-  validado end-to-end.
-- Un job periódico elimina físicamente los tombstones con `deleted_at`
-  de más de 90 días — **no implementado todavía**.
-- El servidor DEBERÍA mantener el `seq` mínimo vigente (el del
-  tombstone no purgado más antiguo) y responder `410 Gone` si `since`
-  es menor a ese mínimo — **no implementado todavía**, a propósito:
-  sin el job de purga, un cursor nunca puede quedar realmente
-  inválido, así que construir el chequeo ahora sería código sin forma
-  de probarse honestamente. Se construye junto con la purga.
+  purga. Expuesto en `GET /sync/changes` (`deleted: true`), validado
+  end-to-end.
+- Job periódico (`runTombstonePurge` en `cmd/server/main.go`, una
+  goroutine con `time.Ticker`, sin dependencia de cron externo —
+  consistente con "un solo contenedor, sin dependencias obligatorias")
+  corre `db.PurgeTombstones` una vez al arrancar y luego cada 24h,
+  eliminando físicamente tombstones con `deleted_at` de más de 90 días
+  en las 7 tablas de dominio (`internal/db.domainTables`).
+- **Watermark por usuario**: antes de borrar, `PurgeTombstones`
+  calcula por usuario el `seq` más alto entre los tombstones que va a
+  purgar (across las 7 tablas, ya que `seq` es un contador compartido)
+  y lo guarda en `user_sync_counters.purged_before_seq` (columna nueva,
+  migración `00012`) tomando el máximo con el valor ya guardado —
+  nunca baja. Es la única forma de saber, después de borrar
+  físicamente una fila, que un cursor viejo ya no puede recibir una
+  respuesta completa.
+- `GET /sync/changes?since=X`: si `X` < `purged_before_seq` del
+  usuario, responde `410 Gone` (en vez de `200` con un resultado
+  incompleto y silencioso) indicando que hace falta un full resync.
+  Este chequeo solo aplica cuando `since > 0` — un full resync
+  (`since` ausente o `0`) siempre puede responderse completo con el
+  estado actual, sin importar qué se haya purgado.
 - Full resync = mismo endpoint sin `since` (o `since=0`): trae todo el
   estado actual no borrado.
 

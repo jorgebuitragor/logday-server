@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log"
 	"net/http"
 	"os"
@@ -77,6 +78,8 @@ func main() {
 	syncStore := sync.NewStore(database)
 	syncHandler := sync.NewHandler(syncStore, authHandler)
 
+	go runTombstonePurge(database)
+
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -119,4 +122,19 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// runTombstonePurge runs db.PurgeTombstones once at startup and then
+// once a day, for the lifetime of the process. Self-hosted single
+// binary, single container — no external cron dependency.
+func runTombstonePurge(database *sql.DB) {
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		if err := db.PurgeTombstones(context.Background(), database); err != nil {
+			log.Printf("purging tombstones: %v", err)
+		}
+		<-ticker.C
+	}
 }

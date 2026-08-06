@@ -1,7 +1,8 @@
 # Sync incremental — Tareas
 
-Estado: en progreso (`GET /sync/changes` y WS en tiempo real
-implementados para las 7 entidades de negocio; CRDT sigue pendiente)
+Estado: en progreso (`GET /sync/changes`, WS en tiempo real y purga de
+tombstones con `410` implementados para las 7 entidades de negocio;
+CRDT y paginación siguen pendientes)
 
 - [x] Definir formato de cursor (secuencia monótona por usuario).
 - [x] Definir forma del endpoint de cambios (unificado, no por tipo).
@@ -19,11 +20,19 @@ implementados para las 7 entidades de negocio; CRDT sigue pendiente)
       tombstones con `deleted:true` (incluidas las dos entidades de
       clave compuesta, `id` sintético correcto), orden global por
       `seq`, 401 sin auth.
-- [ ] Implementar el `410 Gone`/full-resync en cursor inválido —
-      diferido a propósito: sin el job de purga de tombstones (>90
-      días) implementado todavía, un cursor nunca puede quedar
-      realmente inválido, así que el código no tendría forma de
-      probarse honestamente. Se construye junto con la purga.
+- [x] Implementar el job de purga de tombstones y el `410 Gone`/
+      full-resync en cursor inválido: `internal/db/purge.go`
+      (`PurgeTombstones`, corrido desde una goroutine con
+      `time.Ticker` en `cmd/server/main.go`, una vez al arrancar y
+      luego cada 24h — sin cron externo), con un watermark por usuario
+      (`user_sync_counters.purged_before_seq`, migración `00012`) que
+      nunca baja. `GET /sync/changes` responde `410` si `since` está
+      por debajo del watermark del usuario. Validado con tests
+      unitarios contra SQLite real (purga borra tombstones viejos y
+      conserva los recientes, watermark correcto, watermark no
+      retrocede en purgas sucesivas, 410 exacto en el límite) y contra
+      un contenedor real (migración aplicada, job corre sin error al
+      arrancar, sin regresión en `/sync/changes`).
 - [x] Implementar el WebSocket de tiempo real: `internal/realtime/`
       (`GET /ws`), librería `coder/websocket`, auth por primer mensaje
       (`{"type":"auth","token":"..."}` — los navegadores no permiten

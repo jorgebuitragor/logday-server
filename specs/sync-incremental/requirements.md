@@ -1,7 +1,8 @@
 # Sync incremental — Requirements
 
-Estado: en progreso — pull (`GET /sync/changes`) y tiempo real (WS)
-implementados; paginación y CRDT siguen pendientes.
+Estado: en progreso — pull (`GET /sync/changes`), tiempo real (WS) y
+purga de tombstones con invalidación de cursor implementados;
+paginación y CRDT siguen pendientes.
 
 ## Contexto
 

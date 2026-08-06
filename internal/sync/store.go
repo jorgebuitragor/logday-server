@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -11,10 +12,16 @@ import (
 	"github.com/jorgebuitragor/logday-server/internal/absence"
 	"github.com/jorgebuitragor/logday-server/internal/calendar"
 	"github.com/jorgebuitragor/logday-server/internal/dailyentry"
+	"github.com/jorgebuitragor/logday-server/internal/db"
 	"github.com/jorgebuitragor/logday-server/internal/note"
 	"github.com/jorgebuitragor/logday-server/internal/overtime"
 	"github.com/jorgebuitragor/logday-server/internal/task"
 )
+
+// errCursorInvalid signals that since is older than the tombstone
+// purge watermark — some deletes it would need to see are gone, so
+// the caller must do a full resync instead of an incremental one.
+var errCursorInvalid = errors.New("cursor is no longer valid")
 
 type store struct {
 	db *sql.DB
@@ -27,7 +34,20 @@ func NewStore(db *sql.DB) *store {
 	return &store{db: db}
 }
 
+// changesSince returns errCursorInvalid if since predates the purge
+// watermark for userID — callers must not treat that as "no changes",
+// since some tombstones in that range are gone and can't be reported.
 func (s *store) changesSince(ctx context.Context, userID string, since int64) ([]change, error) {
+	if since > 0 {
+		purgedBefore, err := db.PurgedBeforeSeq(ctx, s.db, userID)
+		if err != nil {
+			return nil, fmt.Errorf("checking purge watermark: %w", err)
+		}
+		if since < purgedBefore {
+			return nil, errCursorInvalid
+		}
+	}
+
 	changes := []change{}
 	var err error
 

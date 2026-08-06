@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -149,5 +150,43 @@ func TestChangesSinceUsesNaturalKeyAsID(t *testing.T) {
 	}
 	if changes[1].Type != "daily_entry" || changes[1].ID != "2026-08-05" {
 		t.Fatalf("changes[1] = %+v, want type daily_entry id 2026-08-05", changes[1])
+	}
+}
+
+// TestChangesSinceRejectsCursorOlderThanPurgeWatermark covers the
+// 410-equivalent case: since predates a tombstone that got physically
+// purged, so an incremental answer would silently omit a delete the
+// client needs to see.
+func TestChangesSinceRejectsCursorOlderThanPurgeWatermark(t *testing.T) {
+	s, database := newTestStore(t)
+	ctx := context.Background()
+
+	insertTaskFixture(t, database, "old-tombstone", "user-1", 5, true)
+	// PurgeTombstones only purges rows older than the retention
+	// window, but insertTaskFixture always stamps deleted_at = now.
+	// Backdate it directly so this fixture is actually eligible.
+	if _, err := database.Exec(
+		`UPDATE tasks SET deleted_at = ? WHERE id = 'old-tombstone'`,
+		time.Now().Add(-100*24*time.Hour).UTC().Format(time.RFC3339Nano),
+	); err != nil {
+		t.Fatalf("backdating tombstone fixture: %v", err)
+	}
+	if _, err := database.Exec(
+		`INSERT INTO user_sync_counters (user_id, next_seq) VALUES ('user-1', 6)
+		 ON CONFLICT(user_id) DO UPDATE SET next_seq = MAX(next_seq, 6)`,
+	); err != nil {
+		t.Fatalf("seeding user_sync_counters fixture: %v", err)
+	}
+
+	if err := db.PurgeTombstones(ctx, database); err != nil {
+		t.Fatalf("PurgeTombstones: %v", err)
+	}
+
+	if _, err := s.changesSince(ctx, "user-1", 2); !errors.Is(err, errCursorInvalid) {
+		t.Fatalf("expected errCursorInvalid for since=2 (below watermark), got %v", err)
+	}
+
+	if _, err := s.changesSince(ctx, "user-1", 5); err != nil {
+		t.Fatalf("expected since=5 (at watermark) to succeed, got %v", err)
 	}
 }
