@@ -98,7 +98,7 @@ func TestSoftDeleteEntry(t *testing.T) {
 		t.Fatalf("upsertEntry: %v", err)
 	}
 
-	if err := s.softDelete(ctx, "user-1", "2026-08-05"); err != nil {
+	if _, err := s.softDelete(ctx, "user-1", "2026-08-05"); err != nil {
 		t.Fatalf("softDelete: %v", err)
 	}
 
@@ -110,7 +110,7 @@ func TestSoftDeleteEntry(t *testing.T) {
 		t.Fatalf("expected no entries after delete, got %+v", entries)
 	}
 
-	if err := s.softDelete(ctx, "user-1", "does-not-exist"); !errors.Is(err, errNotFound) {
+	if _, err := s.softDelete(ctx, "user-1", "does-not-exist"); !errors.Is(err, errNotFound) {
 		t.Fatalf("expected errNotFound, got %v", err)
 	}
 }

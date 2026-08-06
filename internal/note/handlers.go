@@ -9,18 +9,21 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/jorgebuitragor/logday-server/internal/auth"
+	"github.com/jorgebuitragor/logday-server/internal/realtime"
 )
 
 // Handler exposes the note HTTP endpoints, protected by authHandler's
 // RequireAuth middleware.
 type Handler struct {
-	store *store
-	auth  *auth.Handler
+	store    *store
+	auth     *auth.Handler
+	realtime *realtime.Hub
 }
 
-// NewHandler builds a Handler backed by s.
-func NewHandler(s *store, authHandler *auth.Handler) *Handler {
-	return &Handler{store: s, auth: authHandler}
+// NewHandler builds a Handler backed by s, notifying hub of every
+// successful write.
+func NewHandler(s *store, authHandler *auth.Handler, hub *realtime.Hub) *Handler {
+	return &Handler{store: s, auth: authHandler, realtime: hub}
 }
 
 // Routes registers the note-related endpoints on r.
@@ -123,6 +126,7 @@ func (h *Handler) upsert(w http.ResponseWriter, r *http.Request, n *Note) {
 		}
 		return
 	}
+	h.realtime.Notify(stored.UserID, "note", stored.ID, stored.Seq)
 	writeJSON(w, http.StatusOK, stored)
 }
 
@@ -130,7 +134,8 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	userID, _ := auth.UserIDFromContext(r.Context())
 	id := chi.URLParam(r, "id")
 
-	if err := h.store.softDelete(r.Context(), id, userID); err != nil {
+	seq, err := h.store.softDelete(r.Context(), id, userID)
+	if err != nil {
 		switch {
 		case errors.Is(err, errNotFound):
 			http.Error(w, "note not found", http.StatusNotFound)
@@ -141,6 +146,7 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	h.realtime.Notify(userID, "note", id, seq)
 	w.WriteHeader(http.StatusNoContent)
 }
 

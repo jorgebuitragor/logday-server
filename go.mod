@@ -4,6 +4,7 @@ go 1.25.7
 
 require (
 	github.com/alexedwards/argon2id v1.0.0
+	github.com/coder/websocket v1.8.15
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0

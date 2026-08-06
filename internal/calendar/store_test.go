@@ -95,10 +95,10 @@ func TestSoftDeleteEventRemovesFromListAndChecksOwnership(t *testing.T) {
 		t.Fatalf("upsertEvent: %v", err)
 	}
 
-	if err := s.softDelete(ctx, "event-1", "user-2"); !errors.Is(err, errForbidden) {
+	if _, err := s.softDelete(ctx, "event-1", "user-2"); !errors.Is(err, errForbidden) {
 		t.Fatalf("expected errForbidden, got %v", err)
 	}
-	if err := s.softDelete(ctx, "event-1", "user-1"); err != nil {
+	if _, err := s.softDelete(ctx, "event-1", "user-1"); err != nil {
 		t.Fatalf("softDelete: %v", err)
 	}
 
@@ -110,7 +110,7 @@ func TestSoftDeleteEventRemovesFromListAndChecksOwnership(t *testing.T) {
 		t.Fatalf("expected no events after delete, got %+v", events)
 	}
 
-	if err := s.softDelete(ctx, "does-not-exist", "user-1"); !errors.Is(err, errNotFound) {
+	if _, err := s.softDelete(ctx, "does-not-exist", "user-1"); !errors.Is(err, errNotFound) {
 		t.Fatalf("expected errNotFound, got %v", err)
 	}
 }

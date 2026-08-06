@@ -79,10 +79,10 @@ func (s *store) upsertDay(ctx context.Context, d *Day) (*Day, error) {
 	return d, nil
 }
 
-func (s *store) softDelete(ctx context.Context, id, userID string) error {
+func (s *store) softDelete(ctx context.Context, id, userID string) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("beginning transaction: %w", err)
+		return 0, fmt.Errorf("beginning transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -91,17 +91,17 @@ func (s *store) softDelete(ctx context.Context, id, userID string) error {
 		Scan(&existingUserID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return errNotFound
+			return 0, errNotFound
 		}
-		return fmt.Errorf("checking absence day: %w", err)
+		return 0, fmt.Errorf("checking absence day: %w", err)
 	}
 	if existingUserID != userID {
-		return errForbidden
+		return 0, errForbidden
 	}
 
 	seq, err := db.NextSeq(ctx, tx, userID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	now := formatTime(time.Now().UTC())
 
@@ -109,13 +109,13 @@ func (s *store) softDelete(ctx context.Context, id, userID string) error {
 		`UPDATE absence_days SET deleted_at = ?, updated_at = ?, seq = ? WHERE id = ?`,
 		now, now, seq, id,
 	); err != nil {
-		return fmt.Errorf("deleting absence day: %w", err)
+		return 0, fmt.Errorf("deleting absence day: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing absence day delete: %w", err)
+		return 0, fmt.Errorf("committing absence day delete: %w", err)
 	}
-	return nil
+	return seq, nil
 }
 
 func (s *store) listDays(ctx context.Context, userID string) ([]Day, error) {

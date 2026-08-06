@@ -16,6 +16,7 @@ internal/calendar/   ídem para CalendarEvent
 internal/absence/    ídem para AbsenceDay
 internal/dailyentry/ ídem para DailyEntry (content aún TEXT plano, no CRDT)
 internal/sync/       fan-out a ChangesSince de cada dominio + GET /sync/changes
+internal/realtime/   Hub de WebSocket por usuario + GET /ws, inyectado en cada dominio para notificar tras cada write
 ```
 
 Cada paquete de dominio es autocontenido: su propio archivo de
@@ -76,6 +77,28 @@ tabla propia ni entidad propia — su trabajo es leer de las tablas de
   hace merge + sort final, válido porque `seq` es un único contador
   por usuario compartido entre todas las entidades
   (`internal/db.NextSeq`), no uno por tabla.
+
+### `internal/realtime`: inyectado, no importado por los dominios
+
+`internal/realtime` (el `Hub` de WebSocket, ver `sync-incremental/design.md`
+para el protocolo) tiene el problema inverso al de `sync`: mientras
+`sync` **importa** cada dominio para leer sus cambios, cada dominio
+necesita **notificar** al hub tras escribir — si `internal/task`
+importara `internal/realtime` y `internal/realtime` importara
+`internal/task` (para construir el hub desde `main.go` con acceso a
+las rutas de cada dominio, por ejemplo), habría un ciclo de imports.
+
+Se resuelve igual que la integración con `auth`: `main.go` construye
+`hub := realtime.NewHub()` una sola vez y lo **inyecta** en el
+`NewHandler` de cada dominio (`task.NewHandler(store, authHandler,
+hub)`), igual que ya se inyecta `*auth.Handler`. `internal/realtime`
+no importa ningún paquete de dominio — es, como `internal/security`,
+un paquete sin conocimiento del dominio que lo usa, solo que en vez de
+crypto genérica expone un `*Hub` con un método `Notify(userID,
+entityType, id string, seq int64)`. Cada dominio llama a `Notify` en
+su `handlers.go` (no en `store.go` — notificar es una responsabilidad
+de la capa HTTP, igual que la separación ya establecida para
+`internal/security`) después de cada upsert/soft-delete exitoso.
 
 El store SQL de cada dominio (`store.go`) no se extrae de forma
 parecida: sus queries son inherentemente específicas de las tablas de

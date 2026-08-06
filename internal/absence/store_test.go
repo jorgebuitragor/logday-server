@@ -93,10 +93,10 @@ func TestSoftDeleteDayRemovesFromListAndChecksOwnership(t *testing.T) {
 		t.Fatalf("upsertDay: %v", err)
 	}
 
-	if err := s.softDelete(ctx, "day-1", "user-2"); !errors.Is(err, errForbidden) {
+	if _, err := s.softDelete(ctx, "day-1", "user-2"); !errors.Is(err, errForbidden) {
 		t.Fatalf("expected errForbidden, got %v", err)
 	}
-	if err := s.softDelete(ctx, "day-1", "user-1"); err != nil {
+	if _, err := s.softDelete(ctx, "day-1", "user-1"); err != nil {
 		t.Fatalf("softDelete: %v", err)
 	}
 
@@ -108,7 +108,7 @@ func TestSoftDeleteDayRemovesFromListAndChecksOwnership(t *testing.T) {
 		t.Fatalf("expected no days after delete, got %+v", days)
 	}
 
-	if err := s.softDelete(ctx, "does-not-exist", "user-1"); !errors.Is(err, errNotFound) {
+	if _, err := s.softDelete(ctx, "does-not-exist", "user-1"); !errors.Is(err, errNotFound) {
 		t.Fatalf("expected errNotFound, got %v", err)
 	}
 }

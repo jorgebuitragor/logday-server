@@ -1,6 +1,7 @@
 # Sync incremental — Requirements
 
-Estado: en diseño
+Estado: en progreso — pull (`GET /sync/changes`) y tiempo real (WS)
+implementados; paginación y CRDT siguen pendientes.
 
 ## Contexto
 
@@ -87,6 +88,15 @@ en tiempo real.
   solicitando `/sync/changes` desde su propio cursor — el mismo
   mecanismo que usaría al reconectar, no un camino separado para
   aplicar el payload del WebSocket directamente.
+- El sistema NO DEBERÁ requerir el header `Authorization` en el
+  handshake del WebSocket (los navegadores no permiten configurarlo en
+  una conexión WS nativa). El cliente DEBERÁ autenticarse enviando un
+  primer mensaje `{"type":"auth","token":"..."}` con su access token
+  vigente; el servidor DEBERÁ cerrar la conexión si ese mensaje no
+  llega a tiempo o el token no es válido.
+- El servidor DEBERÁ enviar pings periódicos a cada conexión para
+  detectar clientes caídos sin cierre limpio, y cerrar/liberar la
+  conexión si no responde.
 
 ## Fuera de este spec (para esta misma feature más adelante)
 
@@ -94,3 +104,7 @@ en tiempo real.
   grandes.
 - Forma exacta en la que viajan los updates CRDT (`yrs`) dentro de este
   protocolo.
+- Estrategia de reconexión del lado del cliente (backoff) — es una
+  decisión de cada cliente, no de este servidor; el servidor solo
+  garantiza que el mismo mecanismo de reconciliación (`/sync/changes`)
+  sirve tanto para reconexión como para el caso en tiempo real.

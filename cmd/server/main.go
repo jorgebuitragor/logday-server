@@ -17,6 +17,7 @@ import (
 	"github.com/jorgebuitragor/logday-server/internal/db"
 	"github.com/jorgebuitragor/logday-server/internal/note"
 	"github.com/jorgebuitragor/logday-server/internal/overtime"
+	"github.com/jorgebuitragor/logday-server/internal/realtime"
 	"github.com/jorgebuitragor/logday-server/internal/sync"
 	"github.com/jorgebuitragor/logday-server/internal/task"
 )
@@ -52,23 +53,26 @@ func main() {
 	}
 	authHandler := auth.NewHandler(authStore, []byte(jwtSecret))
 
+	hub := realtime.NewHub()
+	realtimeHandler := realtime.NewHandler(hub, authHandler)
+
 	taskStore := task.NewStore(database)
-	taskHandler := task.NewHandler(taskStore, authHandler)
+	taskHandler := task.NewHandler(taskStore, authHandler, hub)
 
 	noteStore := note.NewStore(database)
-	noteHandler := note.NewHandler(noteStore, authHandler)
+	noteHandler := note.NewHandler(noteStore, authHandler, hub)
 
 	overtimeStore := overtime.NewStore(database)
-	overtimeHandler := overtime.NewHandler(overtimeStore, authHandler)
+	overtimeHandler := overtime.NewHandler(overtimeStore, authHandler, hub)
 
 	calendarStore := calendar.NewStore(database)
-	calendarHandler := calendar.NewHandler(calendarStore, authHandler)
+	calendarHandler := calendar.NewHandler(calendarStore, authHandler, hub)
 
 	absenceStore := absence.NewStore(database)
-	absenceHandler := absence.NewHandler(absenceStore, authHandler)
+	absenceHandler := absence.NewHandler(absenceStore, authHandler, hub)
 
 	dailyEntryStore := dailyentry.NewStore(database)
-	dailyEntryHandler := dailyentry.NewHandler(dailyEntryStore, authHandler)
+	dailyEntryHandler := dailyentry.NewHandler(dailyEntryStore, authHandler, hub)
 
 	syncStore := sync.NewStore(database)
 	syncHandler := sync.NewHandler(syncStore, authHandler)
@@ -96,6 +100,7 @@ func main() {
 	absenceHandler.Routes(r)
 	dailyEntryHandler.Routes(r)
 	syncHandler.Routes(r)
+	realtimeHandler.Routes(r)
 
 	server := &http.Server{
 		Addr:              addr,

@@ -95,10 +95,10 @@ func TestSoftDeleteEntryChecksOwnership(t *testing.T) {
 		t.Fatalf("upsertEntry: %v", err)
 	}
 
-	if err := s.softDeleteEntry(ctx, "entry-1", "user-2"); !errors.Is(err, errForbidden) {
+	if _, err := s.softDeleteEntry(ctx, "entry-1", "user-2"); !errors.Is(err, errForbidden) {
 		t.Fatalf("expected errForbidden, got %v", err)
 	}
-	if err := s.softDeleteEntry(ctx, "entry-1", "user-1"); err != nil {
+	if _, err := s.softDeleteEntry(ctx, "entry-1", "user-1"); err != nil {
 		t.Fatalf("softDeleteEntry: %v", err)
 	}
 

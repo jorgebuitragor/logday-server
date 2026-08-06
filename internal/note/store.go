@@ -95,11 +95,13 @@ func (s *store) upsertNote(ctx context.Context, n *Note) (*Note, error) {
 	return n, nil
 }
 
-// softDelete marks a note as deleted, provided it belongs to userID.
-func (s *store) softDelete(ctx context.Context, id, userID string) error {
+// softDelete marks a note as deleted, provided it belongs to userID,
+// returning the seq assigned to the tombstone (for the realtime
+// notify call in the handler).
+func (s *store) softDelete(ctx context.Context, id, userID string) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("beginning transaction: %w", err)
+		return 0, fmt.Errorf("beginning transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -108,17 +110,17 @@ func (s *store) softDelete(ctx context.Context, id, userID string) error {
 		Scan(&existingUserID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return errNotFound
+			return 0, errNotFound
 		}
-		return fmt.Errorf("checking note: %w", err)
+		return 0, fmt.Errorf("checking note: %w", err)
 	}
 	if existingUserID != userID {
-		return errForbidden
+		return 0, errForbidden
 	}
 
 	seq, err := db.NextSeq(ctx, tx, userID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	now := formatTime(time.Now().UTC())
 
@@ -126,13 +128,13 @@ func (s *store) softDelete(ctx context.Context, id, userID string) error {
 		`UPDATE notes SET deleted_at = ?, updated_at = ?, seq = ? WHERE id = ?`,
 		now, now, seq, id,
 	); err != nil {
-		return fmt.Errorf("deleting note: %w", err)
+		return 0, fmt.Errorf("deleting note: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing note delete: %w", err)
+		return 0, fmt.Errorf("committing note delete: %w", err)
 	}
-	return nil
+	return seq, nil
 }
 
 func (s *store) listNotes(ctx context.Context, userID string) ([]Note, error) {

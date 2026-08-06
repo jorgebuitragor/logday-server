@@ -9,18 +9,21 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/jorgebuitragor/logday-server/internal/auth"
+	"github.com/jorgebuitragor/logday-server/internal/realtime"
 )
 
 // Handler exposes the overtime HTTP endpoints (entries and per-month
 // metadata), protected by authHandler's RequireAuth middleware.
 type Handler struct {
-	store *store
-	auth  *auth.Handler
+	store    *store
+	auth     *auth.Handler
+	realtime *realtime.Hub
 }
 
-// NewHandler builds a Handler backed by s.
-func NewHandler(s *store, authHandler *auth.Handler) *Handler {
-	return &Handler{store: s, auth: authHandler}
+// NewHandler builds a Handler backed by s, notifying hub of every
+// successful write.
+func NewHandler(s *store, authHandler *auth.Handler, hub *realtime.Hub) *Handler {
+	return &Handler{store: s, auth: authHandler, realtime: hub}
 }
 
 // Routes registers the overtime-related endpoints on r.
@@ -128,6 +131,7 @@ func (h *Handler) upsertEntry(w http.ResponseWriter, r *http.Request, e *Entry) 
 		}
 		return
 	}
+	h.realtime.Notify(stored.UserID, "overtime_entry", stored.ID, stored.Seq)
 	writeJSON(w, http.StatusOK, stored)
 }
 
@@ -135,7 +139,8 @@ func (h *Handler) deleteEntry(w http.ResponseWriter, r *http.Request) {
 	userID, _ := auth.UserIDFromContext(r.Context())
 	id := chi.URLParam(r, "id")
 
-	if err := h.store.softDeleteEntry(r.Context(), id, userID); err != nil {
+	seq, err := h.store.softDeleteEntry(r.Context(), id, userID)
+	if err != nil {
 		switch {
 		case errors.Is(err, errNotFound):
 			http.Error(w, "overtime entry not found", http.StatusNotFound)
@@ -146,6 +151,7 @@ func (h *Handler) deleteEntry(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	h.realtime.Notify(userID, "overtime_entry", id, seq)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -199,6 +205,7 @@ func (h *Handler) putMonthMeta(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	h.realtime.Notify(stored.UserID, "overtime_month_meta", stored.YearMonth, stored.Seq)
 	writeJSON(w, http.StatusOK, stored)
 }
 
@@ -206,7 +213,8 @@ func (h *Handler) deleteMonthMeta(w http.ResponseWriter, r *http.Request) {
 	userID, _ := auth.UserIDFromContext(r.Context())
 	yearMonth := chi.URLParam(r, "yearMonth")
 
-	if err := h.store.softDeleteMonthMeta(r.Context(), userID, yearMonth); err != nil {
+	seq, err := h.store.softDeleteMonthMeta(r.Context(), userID, yearMonth)
+	if err != nil {
 		if errors.Is(err, errNotFound) {
 			http.Error(w, "month metadata not found", http.StatusNotFound)
 			return
@@ -214,6 +222,7 @@ func (h *Handler) deleteMonthMeta(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	h.realtime.Notify(userID, "overtime_month_meta", yearMonth, seq)
 	w.WriteHeader(http.StatusNoContent)
 }
 

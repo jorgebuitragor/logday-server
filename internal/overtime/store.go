@@ -97,10 +97,10 @@ func (s *store) upsertEntry(ctx context.Context, e *Entry) (*Entry, error) {
 	return e, nil
 }
 
-func (s *store) softDeleteEntry(ctx context.Context, id, userID string) error {
+func (s *store) softDeleteEntry(ctx context.Context, id, userID string) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("beginning transaction: %w", err)
+		return 0, fmt.Errorf("beginning transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -109,17 +109,17 @@ func (s *store) softDeleteEntry(ctx context.Context, id, userID string) error {
 		Scan(&existingUserID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return errNotFound
+			return 0, errNotFound
 		}
-		return fmt.Errorf("checking overtime entry: %w", err)
+		return 0, fmt.Errorf("checking overtime entry: %w", err)
 	}
 	if existingUserID != userID {
-		return errForbidden
+		return 0, errForbidden
 	}
 
 	seq, err := db.NextSeq(ctx, tx, userID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	now := formatTime(time.Now().UTC())
 
@@ -127,13 +127,13 @@ func (s *store) softDeleteEntry(ctx context.Context, id, userID string) error {
 		`UPDATE overtime_entries SET deleted_at = ?, updated_at = ?, seq = ? WHERE id = ?`,
 		now, now, seq, id,
 	); err != nil {
-		return fmt.Errorf("deleting overtime entry: %w", err)
+		return 0, fmt.Errorf("deleting overtime entry: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing overtime entry delete: %w", err)
+		return 0, fmt.Errorf("committing overtime entry delete: %w", err)
 	}
-	return nil
+	return seq, nil
 }
 
 func (s *store) listEntries(ctx context.Context, userID string) ([]Entry, error) {
@@ -276,10 +276,10 @@ func (s *store) upsertMonthMeta(ctx context.Context, m *MonthMeta) (*MonthMeta, 
 	return m, nil
 }
 
-func (s *store) softDeleteMonthMeta(ctx context.Context, userID, yearMonth string) error {
+func (s *store) softDeleteMonthMeta(ctx context.Context, userID, yearMonth string) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("beginning transaction: %w", err)
+		return 0, fmt.Errorf("beginning transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -290,14 +290,14 @@ func (s *store) softDeleteMonthMeta(ctx context.Context, userID, yearMonth strin
 	).Scan(&exists)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return errNotFound
+			return 0, errNotFound
 		}
-		return fmt.Errorf("checking overtime month meta: %w", err)
+		return 0, fmt.Errorf("checking overtime month meta: %w", err)
 	}
 
 	seq, err := db.NextSeq(ctx, tx, userID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	now := formatTime(time.Now().UTC())
 
@@ -305,13 +305,13 @@ func (s *store) softDeleteMonthMeta(ctx context.Context, userID, yearMonth strin
 		`UPDATE overtime_month_meta SET deleted_at = ?, updated_at = ?, seq = ? WHERE user_id = ? AND year_month = ?`,
 		now, now, seq, userID, yearMonth,
 	); err != nil {
-		return fmt.Errorf("deleting overtime month meta: %w", err)
+		return 0, fmt.Errorf("deleting overtime month meta: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing overtime month meta delete: %w", err)
+		return 0, fmt.Errorf("committing overtime month meta delete: %w", err)
 	}
-	return nil
+	return seq, nil
 }
 
 func (s *store) listMonthMeta(ctx context.Context, userID string) ([]MonthMeta, error) {

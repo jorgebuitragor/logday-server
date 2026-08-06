@@ -76,10 +76,10 @@ func (s *store) upsertEntry(ctx context.Context, e *Entry) (*Entry, error) {
 	return e, nil
 }
 
-func (s *store) softDelete(ctx context.Context, userID, date string) error {
+func (s *store) softDelete(ctx context.Context, userID, date string) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("beginning transaction: %w", err)
+		return 0, fmt.Errorf("beginning transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -90,14 +90,14 @@ func (s *store) softDelete(ctx context.Context, userID, date string) error {
 	).Scan(&exists)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return errNotFound
+			return 0, errNotFound
 		}
-		return fmt.Errorf("checking daily entry: %w", err)
+		return 0, fmt.Errorf("checking daily entry: %w", err)
 	}
 
 	seq, err := db.NextSeq(ctx, tx, userID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	now := formatTime(time.Now().UTC())
 
@@ -105,13 +105,13 @@ func (s *store) softDelete(ctx context.Context, userID, date string) error {
 		`UPDATE daily_entries SET deleted_at = ?, updated_at = ?, seq = ? WHERE user_id = ? AND date = ?`,
 		now, now, seq, userID, date,
 	); err != nil {
-		return fmt.Errorf("deleting daily entry: %w", err)
+		return 0, fmt.Errorf("deleting daily entry: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing daily entry delete: %w", err)
+		return 0, fmt.Errorf("committing daily entry delete: %w", err)
 	}
-	return nil
+	return seq, nil
 }
 
 func (s *store) listEntries(ctx context.Context, userID string) ([]Entry, error) {
