@@ -26,11 +26,10 @@ validadas end-to-end.
       contenedor (crear, listar, LWW por fila con 409 en escritura
       obsoleta, borrar, aislamiento entre usuarios).
 - [x] Implementar `notes` completo: `internal/note/` (mismo patrón que
-      `tasks`), con `content` como `TEXT` plano (LWW por fila) en vez
-      de `content_crdt` — ver desviación documentada en `design.md`.
-      Sumado al fan-out de `internal/sync`; validado end-to-end junto
-      con `tasks` en el mismo `/sync/changes` (orden global por `seq`
-      compartido entre ambas entidades).
+      `tasks` para los campos LWW). Sumado al fan-out de
+      `internal/sync`; validado end-to-end junto con `tasks` en el
+      mismo `/sync/changes` (orden global por `seq` compartido entre
+      ambas entidades).
 - [x] Implementar las 5 entidades restantes, mismo patrón:
   - `internal/overtime/` — `overtime_entries` (id propio, igual que
     `tasks`) y `overtime_month_meta` (clave natural `(user_id,
@@ -40,8 +39,7 @@ validadas end-to-end.
     `color`/`repeat` contra los valores permitidos.
   - `internal/absence/` — `absence_days`, con validación de `type`.
   - `internal/dailyentry/` — `daily_entries`, clave natural
-    `(user_id, date)`, `content` interino (LWW por fila, no CRDT —
-    misma desviación que `notes`).
+    `(user_id, date)`.
 
   Las 5 sumadas al fan-out de `internal/sync` (7 entidades en total),
   con un helper genérico `addChanges` para reducir la duplicación que
@@ -51,3 +49,10 @@ validadas end-to-end.
   entidades en orden global por `seq`, `id` sintético correcto para
   las dos entidades de clave compuesta, tombstone tras `DELETE` en una
   entidad de clave compuesta (`daily_entries`), 401 sin auth.
+- [x] Implementar CRDT real para `notes.content_crdt` y
+      `daily_entries.content_crdt` (`Deln0r/ygo`, `internal/crdt/`) —
+      ver `arquitectura-inicial/design.md` para el historial completo
+      de la decisión. Migración `00013` reemplaza `content TEXT` por
+      `content_crdt BLOB` en ambas tablas. Validado end-to-end contra
+      un contenedor real: dos ediciones concurrentes offline al mismo
+      texto se mezclan correctamente en ambas entidades.

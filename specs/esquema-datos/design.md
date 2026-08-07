@@ -4,9 +4,8 @@ Estado: implementado — las 7 tablas existen y tienen su paquete de
 dominio (`internal/task/`, `internal/note/`, `internal/overtime/`,
 `internal/calendar/`, `internal/absence/`, `internal/dailyentry/`).
 Índices más allá de `(user_id, seq)` siguen sin definirse (no
-bloqueante). `notes.content` y `daily_entries.content` usan la
-simplificación LWW por fila en vez de CRDT — ver
-`arquitectura-inicial/requirements.md`.
+bloqueante). `notes.content_crdt` y `daily_entries.content_crdt` son
+CRDT real (`Deln0r/ygo`) — ver `arquitectura-inicial/design.md`.
 
 ## Convenciones generales
 
@@ -60,16 +59,16 @@ Excluidos: `filePath`, `linked_paths`. Implementada — ver
 
 ### `notes`
 
-Implementada — ver `internal/note/` y
-`internal/db/migrations/00006_create_notes.sql`. **Con una desviación
-deliberada del diseño original**: `content` es `TEXT` plano (LWW por
-fila completa, igual que `tasks.content`), no `content_crdt BLOB`
-todavía — la integración `yrs`/CGO decidida en `arquitectura-inicial`
-no se construyó (requiere escribir bindings CGO/Rust a mano contra una
-API no verificada, evaluado como riesgo demasiado alto para resolver
-de paso). Queda como tarea de seguimiento explícita — ver
-`arquitectura-inicial/tasks.md`. Migrar `content` → `content_crdt`
-cuando se aborde esa tarea.
+Implementada — ver `internal/note/`, `internal/crdt/` y
+`internal/db/migrations/00006_create_notes.sql` +
+`00013_notes_daily_entries_content_crdt.sql` (migración posterior que
+reemplazó `content TEXT` por `content_crdt BLOB`). `content_crdt` es
+CRDT real (`Deln0r/ygo`, Go puro, wire-compatible con Yjs — ver
+`arquitectura-inicial/design.md` para el historial de la decisión),
+escrito exclusivamente vía `POST /notes/:id/content` (nunca a través
+del upsert de metadata LWW). `Content`/`ContentState` en la respuesta
+JSON se derivan de `content_crdt` (texto plano decodificado / estado
+crudo en base64), nunca se serializan directamente.
 
 | Columna | Tipo | Notas |
 |---|---|---|
@@ -81,7 +80,7 @@ cuando se aborde esa tarea.
 | created | DATE | |
 | updated | DATE | fecha de negocio (la que ve el usuario), distinta de `updated_at` |
 | pinned | BOOLEAN | |
-| content | TEXT | **interino**: LWW por fila, no CRDT — ver nota arriba |
+| content_crdt | BLOB NULL | estado CRDT compactado (`Deln0r/ygo`), NULL = sin contenido todavía |
 | seq | INTEGER | |
 | updated_at | TIMESTAMPTZ | bookkeeping de sync, mandado por el cliente (ver `sync-incremental`) |
 | deleted_at | TIMESTAMPTZ NULL | |
@@ -176,19 +175,22 @@ Implementada — ver `internal/absence/` y
 
 ### `daily_entries`
 
-Implementada — ver `internal/dailyentry/` y
-`internal/db/migrations/00011_create_daily_entries.sql`. Misma
-desviación deliberada que `notes`: `content` es `TEXT` plano (LWW por
-fila), no `content_crdt BLOB` todavía — ver nota en `notes` arriba y
-`arquitectura-inicial/tasks.md` para el seguimiento de CRDT. Clave
+Implementada — ver `internal/dailyentry/`, `internal/crdt/` y
+`internal/db/migrations/00011_create_daily_entries.sql` +
+`00013_notes_daily_entries_content_crdt.sql`. Misma librería CRDT que
+`notes` (`content_crdt`, `Deln0r/ygo`). A diferencia de `Note`, no hay
+campos LWW aparte del contenido — toda la entidad es texto CRDT, así
+que no hay separación entre un endpoint de metadata y uno de
+contenido: `PUT /daily-entries/:date` es la única escritura, y aplica
+directamente un `content_update` (crea la fila si no existe). Clave
 natural `(user_id, date)`, sin id propio — mismo patrón de rutas que
-`overtime_month_meta` (`PUT /daily-entries/:date`, sin `POST`).
+`overtime_month_meta` (sin `POST`).
 
 | Columna | Tipo | Notas |
 |---|---|---|
 | user_id | TEXT | FK, parte de PK compuesta |
 | date | DATE | parte de PK compuesta; actúa como `id` sintético en el endpoint de cambios |
-| content | TEXT | **interino**: LWW por fila, no CRDT |
+| content_crdt | BLOB NULL | estado CRDT compactado (`Deln0r/ygo`), NULL = sin contenido todavía |
 | seq | INTEGER | |
 | updated_at | TIMESTAMPTZ | |
 | deleted_at | TIMESTAMPTZ NULL | |
@@ -198,6 +200,9 @@ natural `(user_id, date)`, sin id propio — mismo patrón de rutas que
 - Índices más allá de `(user_id, seq)` (ya presente en las 7 tablas)
   — no se ha identificado ningún patrón de consulta que lo necesite
   todavía.
-- Formato exacto del payload CRDT dentro de `content`/`content_crdt` y
-  de cómo viaja en el endpoint de cambios, para cuando se resuelva el
-  seguimiento de CRDT — ver `sync-incremental/design.md`.
+- Formato exacto del payload CRDT dentro de `data.content_state` (el
+  campo base64 en la respuesta) tal como viaja en `/sync/changes` —
+  hoy es el `EncodeStateAsUpdate` completo de `Deln0r/ygo` en cada
+  cambio, sin optimizar para el caso de un historial largo de updates
+  pequeños (ver `sync-incremental/design.md`, paginación pendiente,
+  problema relacionado pero no idéntico).

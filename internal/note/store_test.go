@@ -25,6 +25,9 @@ func newTestStore(t *testing.T) *store {
 	return NewStore(database)
 }
 
+// sampleNote covers the LWW-governed fields only — content is written
+// exclusively through applyContentUpdate (see content_test.go), never
+// through upsertNote.
 func sampleNote(userID string, updatedAt time.Time) *Note {
 	return &Note{
 		ID:        "note-1",
@@ -34,7 +37,6 @@ func sampleNote(userID string, updatedAt time.Time) *Note {
 		Tags:      []string{"sync"},
 		Created:   "2026-08-03",
 		Updated:   "2026-08-03",
-		Content:   "some markdown",
 		UpdatedAt: updatedAt,
 	}
 }

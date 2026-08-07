@@ -131,8 +131,8 @@ func TestChangesSinceUsesNaturalKeyAsID(t *testing.T) {
 		t.Fatalf("inserting overtime_month_meta fixture: %v", err)
 	}
 	_, err = database.Exec(`
-		INSERT INTO daily_entries (user_id, date, content, seq, updated_at)
-		VALUES ('user-1', '2026-08-05', 'worked on sync', 2, ?)
+		INSERT INTO daily_entries (user_id, date, content_crdt, seq, updated_at)
+		VALUES ('user-1', '2026-08-05', NULL, 2, ?)
 	`, now)
 	if err != nil {
 		t.Fatalf("inserting daily_entries fixture: %v", err)

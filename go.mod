@@ -3,6 +3,7 @@ module github.com/jorgebuitragor/logday-server
 go 1.25.7
 
 require (
+	github.com/Deln0r/ygo v1.15.0
 	github.com/alexedwards/argon2id v1.0.0
 	github.com/coder/websocket v1.8.15
 	github.com/go-chi/chi/v5 v5.3.1

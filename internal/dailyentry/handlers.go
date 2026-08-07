@@ -1,6 +1,7 @@
 package dailyentry
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -41,8 +42,8 @@ func (h *Handler) Routes(r chi.Router) {
 }
 
 type entryRequest struct {
-	Content   string    `json:"content"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ContentUpdate string    `json:"content_update"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 func (h *Handler) put(w http.ResponseWriter, r *http.Request) {
@@ -54,19 +55,23 @@ func (h *Handler) put(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
+	if req.ContentUpdate == "" {
+		http.Error(w, "content_update is required", http.StatusBadRequest)
+		return
+	}
 	if req.UpdatedAt.IsZero() {
 		http.Error(w, "updated_at is required", http.StatusBadRequest)
 		return
 	}
 
-	e := Entry{UserID: userID, Date: date, Content: req.Content, UpdatedAt: req.UpdatedAt}
-
-	stored, err := h.store.upsertEntry(r.Context(), &e)
+	update, err := base64.StdEncoding.DecodeString(req.ContentUpdate)
 	if err != nil {
-		if errors.Is(err, errConflict) {
-			http.Error(w, "a newer version of this daily entry already exists", http.StatusConflict)
-			return
-		}
+		http.Error(w, "content_update must be base64-encoded", http.StatusBadRequest)
+		return
+	}
+
+	stored, err := h.store.applyContentUpdate(r.Context(), userID, date, update, req.UpdatedAt)
+	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}

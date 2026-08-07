@@ -1,7 +1,9 @@
 # Arquitectura inicial — Diseño
 
-Estado: en diseño (decisiones de stack y de resolución de conflictos
-tomadas; protocolo de sync pendiente — ver `requirements.md`)
+Estado: implementado — stack, resolución de conflictos (incluido CRDT
+real para texto largo) y protocolo de sync completos. Ver
+`sync-incremental/`, `esquema-datos/`, `auth-multiusuario/` para el
+detalle de cada pieza.
 
 ## Stack: Go
 
@@ -26,11 +28,15 @@ velocidad de desarrollo ni ecosistema:
 - **Base de datos**: SQLite por defecto (archivo único, cero
   configuración), con la capa de acceso escrita para que Postgres sea
   intercambiable en instalaciones más grandes — `database/sql` +
-  `sqlc` en vez de un ORM pesado. Driver: `mattn/go-sqlite3` (CGO) en
-  vez de `modernc.org/sqlite` (puro Go) — dado que CGO ya es
-  obligatorio en el build por `yrs` (ver más abajo), no hay motivo
-  para pagar el costo de rendimiento del driver puro Go solo para
-  evitar una dependencia CGO que de todas formas está presente.
+  `sqlc` en vez de un ORM pesado. Driver: `mattn/go-sqlite3` (CGO).
+  Nota histórica: se eligió cuando CGO parecía obligatorio de todas
+  formas por `yrs` (ver "Resolución de conflictos" — decisión luego
+  revertida a favor de una librería CRDT puro Go). La razón original
+  ("no hay costo adicional, CGO ya está presente") ya no aplica, pero
+  `mattn/go-sqlite3` se queda: sigue siendo el driver SQLite más
+  maduro/rápido en Go, y no hay urgencia de migrar a
+  `modernc.org/sqlite` solo para volver el binario 100% CGO-free sin
+  un motivo concreto que lo justifique.
 - **Migraciones**: `golang-migrate` o `goose`.
 - **WebSocket**: `nhooyr.io/websocket` o `gorilla/websocket`, para el
   requisito de sync en tiempo real.
@@ -116,31 +122,61 @@ Estrategia mixta (ver `requirements.md`):
   automático (en vez de "gana el más reciente") tiene sentido. No se
   extiende a otros campos sin decisión explícita.
 
-### Librería e implementación: `yrs` vía CGO
+### Librería e implementación: `Deln0r/ygo` (Go puro) — implementado
 
-- **Librería**: [`yrs`](https://github.com/y-crdt/y-crdt) — puerto en
-  Rust de Yjs, mantenido por el mismo equipo, con bindings C oficiales
-  (`yffi`/`libyrs`) pensados para consumirse desde otros lenguajes.
-- **Rol del servidor**: no es un relay 100% opaco. El servidor Go
-  consume `libyrs` vía CGO para poder compactar el log de updates en
-  un snapshot periódicamente (sin compactación, el log crece sin
-  límite — cada edición de texto genera un update). El merge de
-  negocio del contenido sigue ocurriendo con la misma librería CRDT,
-  no con lógica propia del servidor.
-- **Por qué CGO y no WASM**: se evaluó correr `yrs` compilado a WASM
-  vía `wazero` (runtime WASM puro Go, sin CGO) para mantener
-  cross-compilación trivial. Se descartó porque no existe un target
-  WASM oficial para `yffi` pensado para consumirse desde Go — tocaría
-  compilarlo y mantenerlo a mano, con más riesgo que beneficio. CGO
-  usa el artefacto oficial, con llamadas nativas y sin el overhead de
-  marshaling a través de memoria lineal WASM.
-- **Costo aceptado**: CGO complica la cross-compilación para
-  Raspberry Pi/ARM (un target explícito del proyecto) porque ya no
-  alcanza con `GOOS`/`GOARCH` — hace falta un toolchain C por
-  arquitectura. Se resuelve con `docker buildx` + el helper
-  [`tonistiigi/xx`](https://github.com/tonistiigi/xx) en el Dockerfile
-  multi-stage, un patrón estándar para cross-compilar binarios Go con
-  CGO por plataforma.
+**Historial de la decisión** (documentado porque cambió dos veces, no
+porque haga falta para entender el estado final, pero para que quede
+registro de por qué):
+
+1. Diseño original: [`yrs`](https://github.com/y-crdt/y-crdt) (puerto
+   en Rust de Yjs) vía CGO, usando los bindings C oficiales
+   (`yffi`/`libyrs`). Nunca se implementó — el riesgo de escribir
+   bindings CGO/Rust a mano contra una API no verificada se evaluó dos
+   veces como demasiado alto para resolver de paso al construir
+   `note`/`daily_entries` con la simplificación LWW por fila mientras
+   tanto (ver `esquema-datos/design.md`, histórico).
+2. Antes de escribir esos bindings, se investigó la API real de
+   `yffi` (verificada contra el código fuente actual, no de memoria):
+   sí es viable — `yrs`/`yffi` v0.27.3, MIT, activamente mantenida,
+   firmas de función confirmadas. Pero la misma investigación encontró
+   que **ya existen librerías CRDT de texto en Go puro**,
+   wire-compatibles con Yjs, que evitan CGO/Rust por completo:
+   `Deln0r/ygo` y `reearth/ygo`.
+3. Se eligió **`github.com/Deln0r/ygo`** (MIT, v1.15.0 al momento de
+   integrarlo): coherente con el criterio que ya guio el resto de
+   decisiones de este proyecto (Go sobre Rust por curva de
+   aprendizaje, evitar CGO donde no haga falta). Con esto, la
+   cross-compilación para Raspberry Pi/ARM vuelve a ser el
+   `GOOS`/`GOARCH` normal que ya usa el resto del binario — no hizo
+   falta el toolchain cruzado ni `tonistiigi/xx` que la vía CGO habría
+   requerido. `mattn/go-sqlite3` sigue siendo la única pieza CGO del
+   proyecto (ver "Base de datos" arriba), sin relación con CRDT.
+   `reearth/ygo` no se descartó por un defecto concreto encontrado —
+   no llegó a evaluarse en profundidad (ver nota abajo).
+
+**Nota sobre el proceso**: la implementación inicial de `note` con
+`Deln0r/ygo` fue escrita por un agente que se saltó su instrucción de
+solo investigar sin tocar el repo, sin completar la comparación contra
+`reearth/ygo` que se le había pedido. El código resultante se revisó
+a fondo (compila, tests propios pasan, incluyendo el caso real que
+importa: dos ediciones concurrentes offline se mezclan sin perderse) y
+se decidió conservarlo en vez de descartarlo, dado que reescribir con
+otra librería no tenía una razón concreta en contra de `Deln0r/ygo` —
+solo evaluación pendiente. `daily_entries` se completó después con el
+mismo patrón, ya de forma directa.
+
+- **`internal/crdt`**: envuelve `Deln0r/ygo` en dos operaciones
+  (`ApplyTextUpdate`, `Text`), sin conocimiento de dominio — mismo
+  criterio que `internal/security`. `ApplyTextUpdate` es idempotente
+  (reaplicar el mismo update no duplica texto) y nunca rechaza por
+  staleness (los updates CRDT conmutan, a diferencia de LWW).
+- **Rol del servidor**: no es un relay 100% opaco — persiste el estado
+  CRDT compactado (`EncodeStateAsUpdate` tras cada merge) en
+  `content_crdt BLOB`, no el log completo de updates sin límite.
+- Endpoint dedicado por entidad (`POST /notes/:id/content`,
+  `PUT /daily-entries/:date` — este último ya no tiene un endpoint de
+  metadata separado, ver `esquema-datos/design.md`), separado de los
+  campos LWW-por-fila, con el `content_update` viajando en base64.
 
 ## Integración de clientes y transición desde git
 

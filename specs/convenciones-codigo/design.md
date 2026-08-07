@@ -8,13 +8,14 @@ Estado: en diseño
 cmd/server/          entrypoint, wiring de router y servidor HTTP
 internal/db/         conexión SQLite/Postgres + migraciones (goose), compartida entre dominios
 internal/security/   primitivas criptográficas genéricas (hash de password, JWT, tokens opacos) — sin lógica de negocio
+internal/crdt/       envuelve Deln0r/ygo (merge/decode de texto CRDT) — sin lógica de negocio, mismo criterio que security
 internal/auth/       users/devices/sesiones: handlers, store, bootstrap del admin
 internal/task/       handlers, store y ChangesSince (exportada) de Task
-internal/note/       ídem para Note (content aún TEXT plano, no CRDT — ver arquitectura-inicial)
+internal/note/       ídem para Note (content_crdt vía internal/crdt, endpoint dedicado)
 internal/overtime/   ídem para OvertimeEntry y OvertimeMonthMeta (dos tablas, un dominio)
 internal/calendar/   ídem para CalendarEvent
 internal/absence/    ídem para AbsenceDay
-internal/dailyentry/ ídem para DailyEntry (content aún TEXT plano, no CRDT)
+internal/dailyentry/ ídem para DailyEntry (content_crdt vía internal/crdt, sin campos LWW propios)
 internal/sync/       fan-out a ChangesSince de cada dominio + GET /sync/changes
 internal/realtime/   Hub de WebSocket por usuario + GET /ws, inyectado en cada dominio para notificar tras cada write
 ```
@@ -29,8 +30,8 @@ paquetes distintos. Se evita también hexagonal/ports & adapters
 tamaño de este proyecto — mismo criterio que ya se aplicó al descartar
 CRDT en todos los campos en vez de acotarlo.
 
-`internal/security` es la única excepción deliberada a "todo vive en
-su paquete de dominio": agrupa primitivas criptográficas que no tienen
+`internal/security` e `internal/crdt` son las excepciones deliberadas
+a "todo vive en su paquete de dominio": agrupan primitivas que no tienen
 ningún conocimiento del dominio auth (hash de password, firmar/parsear
 JWT, generar/hashear tokens opacos de alta entropía) y que cualquier
 dominio futuro podría necesitar sin depender de `internal/auth`

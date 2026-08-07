@@ -6,15 +6,19 @@ import "time"
 // shape as overtime.MonthMeta. Date acts as the synthetic id in REST
 // URLs and sync changes.
 //
-// Content is a plain LWW-by-row field for now, same simplification as
-// note.Content — it becomes CRDT-backed once the yrs/CGO integration
-// is built (see specs/arquitectura-inicial, "Resolución de
-// conflictos"). Not implemented yet: tracked as a follow-up.
+// Unlike Note, there are no LWW-governed fields alongside content —
+// the entire entity is CRDT-backed text (github.com/Deln0r/ygo,
+// wire-compatible with Yjs), so there's a single write path
+// (applyContentUpdate) instead of a create/content split. ContentCRDT
+// is the raw stored state (never serialized directly);
+// Content/ContentState are computed from it for API responses.
 type Entry struct {
-	UserID    string     `json:"-"`
-	Date      string     `json:"date"`
-	Content   string     `json:"content"`
-	Seq       int64      `json:"seq"`
-	UpdatedAt time.Time  `json:"updated_at"`
-	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+	UserID       string     `json:"-"`
+	Date         string     `json:"date"`
+	ContentCRDT  []byte     `json:"-"`
+	Content      string     `json:"content"`
+	ContentState string     `json:"content_state,omitempty"`
+	Seq          int64      `json:"seq"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
 }

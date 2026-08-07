@@ -1,3 +1,5 @@
+github.com/Deln0r/ygo v1.15.0 h1:+21LFdeMfmMkoJaq0Z9zb+FLLLbYxkstd0Fw834YbJA=
+github.com/Deln0r/ygo v1.15.0/go.mod h1:Qt/Ra7ueNM+8u+dHUEaDsn7s7dqyRg3YjGwNnImHgFE=
 github.com/alexedwards/argon2id v1.0.0 h1:wJzDx66hqWX7siL/SRUmgz3F8YMrd/nfX/xHHcQQP0w=
 github.com/alexedwards/argon2id v1.0.0/go.mod h1:tYKkqIjzXvZdzPvADMWOEZ+l6+BD6CtBXMj5fnJppiw=
 github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=
