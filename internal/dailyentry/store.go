@@ -60,7 +60,8 @@ func (s *store) applyContentUpdate(ctx context.Context, userID, date string, upd
 		ON CONFLICT(user_id, date) DO UPDATE SET
 			content_crdt = excluded.content_crdt,
 			seq = excluded.seq,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			deleted_at = NULL
 	`, userID, date, newState, seq, formatTime(updatedAt)); err != nil {
 		return nil, fmt.Errorf("upserting daily entry: %w", err)
 	}

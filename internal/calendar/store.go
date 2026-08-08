@@ -71,7 +71,8 @@ func (s *store) upsertEvent(ctx context.Context, e *Event) (*Event, error) {
 			reminder_minutes = excluded.reminder_minutes,
 			repeat = excluded.repeat,
 			seq = excluded.seq,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			deleted_at = NULL
 	`,
 		e.ID, e.UserID, e.Title, e.Date, e.Time, e.Description, e.Color,
 		e.ReminderMinutes, e.Repeat, e.Seq, formatTime(e.UpdatedAt),

@@ -81,7 +81,8 @@ func (s *store) upsertEntry(ctx context.Context, e *Entry) (*Entry, error) {
 			extras_diurnas_festivas = excluded.extras_diurnas_festivas,
 			extras_nocturnas_festivas = excluded.extras_nocturnas_festivas,
 			seq = excluded.seq,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			deleted_at = NULL
 	`,
 		e.ID, e.UserID, e.Fecha, e.SolicitadaPor, e.Actividad, e.Observaciones,
 		e.HoraInicio, e.HoraFinal, e.TotalHoras, e.ExtrasDiurnas, e.ExtrasNocturnas,
@@ -264,7 +265,8 @@ func (s *store) upsertMonthMeta(ctx context.Context, m *MonthMeta) (*MonthMeta, 
 			colaborador = excluded.colaborador,
 			cedula = excluded.cedula,
 			seq = excluded.seq,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			deleted_at = NULL
 	`, m.UserID, m.YearMonth, m.Colaborador, m.Cedula, m.Seq, formatTime(m.UpdatedAt))
 	if err != nil {
 		return nil, fmt.Errorf("upserting overtime month meta: %w", err)

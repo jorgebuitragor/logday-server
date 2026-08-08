@@ -82,7 +82,8 @@ func (s *store) upsertTask(ctx context.Context, t *Task) (*Task, error) {
 			due = excluded.due,
 			content = excluded.content,
 			seq = excluded.seq,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			deleted_at = NULL
 	`,
 		t.ID, t.UserID, t.Title, t.TaskCode, t.Status, string(tagsJSON), t.Project,
 		t.Created, t.CompletedAt, t.Due, t.Content, t.Seq, formatTime(t.UpdatedAt),

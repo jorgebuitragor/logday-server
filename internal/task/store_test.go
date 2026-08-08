@@ -136,6 +136,40 @@ func TestSoftDeleteRemovesFromListAndChecksOwnership(t *testing.T) {
 	}
 }
 
+func TestUpsertTaskAfterSoftDeleteResurrectsRow(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	base := time.Now()
+	if _, err := s.upsertTask(ctx, sampleTask("user-1", base)); err != nil {
+		t.Fatalf("initial upsertTask: %v", err)
+	}
+	if _, err := s.softDelete(ctx, "task-1", "user-1"); err != nil {
+		t.Fatalf("softDelete: %v", err)
+	}
+
+	recreated := sampleTask("user-1", base.Add(time.Minute))
+	recreated.Title = "recreated after delete"
+	if _, err := s.upsertTask(ctx, recreated); err != nil {
+		t.Fatalf("upsertTask after delete: %v", err)
+	}
+
+	tasks, err := s.listTasks(ctx, "user-1")
+	if err != nil {
+		t.Fatalf("listTasks: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].Title != "recreated after delete" || tasks[0].DeletedAt != nil {
+		t.Fatalf("expected the recreated task to be live again, got %+v", tasks)
+	}
+
+	// A second delete must succeed — the earlier ON CONFLICT DO UPDATE
+	// bug left deleted_at set after recreation, so softDelete's
+	// "WHERE deleted_at IS NULL" check would still find no live row.
+	if _, err := s.softDelete(ctx, "task-1", "user-1"); err != nil {
+		t.Fatalf("softDelete after resurrection: %v", err)
+	}
+}
+
 func TestListTasksIsScopedToUser(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

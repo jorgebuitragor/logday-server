@@ -67,7 +67,8 @@ func (s *store) upsertDay(ctx context.Context, d *Day) (*Day, error) {
 			type = excluded.type,
 			note = excluded.note,
 			seq = excluded.seq,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			deleted_at = NULL
 	`, d.ID, d.UserID, d.Date, d.Type, d.Note, d.Seq, formatTime(d.UpdatedAt))
 	if err != nil {
 		return nil, fmt.Errorf("upserting absence day: %w", err)

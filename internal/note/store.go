@@ -83,7 +83,8 @@ func (s *store) upsertNote(ctx context.Context, n *Note) (*Note, error) {
 			updated = excluded.updated,
 			pinned = excluded.pinned,
 			seq = excluded.seq,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			deleted_at = NULL
 	`,
 		n.ID, n.UserID, n.Title, n.Folder, string(tagsJSON), n.Created, n.Updated,
 		n.Pinned, n.Seq, formatTime(n.UpdatedAt),
