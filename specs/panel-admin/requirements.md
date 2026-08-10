@@ -59,6 +59,10 @@ depender de quien sepa manejar la API cruda.
   `GET /devices`, que solo muestra los propios).
 - El sistema DEBERÁ permitir que un admin revoque el dispositivo de
   cualquier usuario desde el panel.
+- El sistema DEBERÁ mostrar, junto a cada dispositivo, la IP de su
+  conexión más reciente y un ícono que identifique aproximadamente su
+  tipo (móvil, tablet, cliente API/CLI o escritorio/navegador por
+  default) a partir del User-Agent registrado.
 
 ### Sesión del panel
 
@@ -71,6 +75,25 @@ depender de quien sepa manejar la API cruda.
   sigue siendo un admin activo, no solo confiar en lo que la sesión
   decía al momento de emitirse.
 - El sistema DEBERÁ proteger cada formulario del panel contra CSRF.
+- El sistema DEBERÁ pedir confirmación explícita antes de ejecutar
+  acciones destructivas o que afectan sesiones de otros usuarios (dar de
+  baja, resetear password, revocar un device, promover/degradar admin,
+  cerrar la sesión propia).
+
+### Configuración de la instancia
+
+- El sistema DEBERÁ permitir que un admin, desde el panel, configure el
+  nombre de la instancia, la retención de tombstones (días) y el rate
+  limit de login (intentos y ventana) — reemplazando lo que hoy son
+  constantes fijas en el código.
+- Los cambios a estos tres valores DEBERÁN aplicarse sin reiniciar el
+  servidor.
+- El sistema DEBERÁ validar rangos razonables para cada valor antes de
+  guardarlo (ver `design.md` para los límites concretos).
+- El sistema DEBERÁ ofrecer, desde el panel, generar un valor sugerido
+  para `JWT_SECRET` — sin persistirlo ni aplicarlo en caliente (ver
+  "Fuera de este spec": la rotación en caliente sigue sin implementarse
+  a propósito).
 
 ## Fuera de este spec
 
@@ -78,9 +101,13 @@ depender de quien sepa manejar la API cruda.
   decidirse — ver `auth-multiusuario/requirements.md`). El reset de
   contraseña de este spec es **admin-asistido**, no self-service.
 - Autenticación de dos factores para el panel.
-- Configuración de SMTP, rotación de `JWT_SECRET`, o cualquier otro
-  ajuste operativo más allá de usuarios/dispositivos — fuera de alcance
-  hasta que exista una necesidad concreta.
+- **Rotación en caliente de `JWT_SECRET`**: el panel genera un valor
+  sugerido para copiar a mano en `.env` (ver arriba), pero no lo persiste
+  ni cambia la clave activa del proceso — sigue siendo una variable de
+  entorno, leída una sola vez al arrancar. Cambiar esto requeriría mover
+  la raíz de confianza de JWT de env var a base de datos, una decisión
+  de arquitectura aparte que no se toma acá.
+- Configuración de SMTP.
 - Purga de datos sincronizados (tasks, notes, etc.) al dar de baja un
   usuario — ver "Explícitamente pendiente" en `design.md`.
 - Paginación del listado de usuarios/dispositivos — instancia

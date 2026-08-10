@@ -26,7 +26,7 @@ type Handler struct {
 // NewHandler builds a Handler backed by s, signing/verifying access
 // tokens with jwtSecret.
 func NewHandler(s *store, jwtSecret []byte) *Handler {
-	return &Handler{store: s, jwtSecret: jwtSecret, limiter: newLoginLimiter(), tmpl: parseTemplates()}
+	return &Handler{store: s, jwtSecret: jwtSecret, limiter: newLoginLimiter(s.db), tmpl: parseTemplates()}
 }
 
 // Routes registers the auth-related endpoints on r.
@@ -98,7 +98,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	d, err := h.store.createDevice(r.Context(), u.ID, deviceName, refreshHash, time.Now().Add(refreshTokenTTL))
+	d, err := h.store.createDevice(r.Context(), u.ID, deviceName, refreshHash, time.Now().Add(refreshTokenTTL), clientIP(r), r.UserAgent())
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -159,7 +159,7 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.store.rotateRefreshToken(r.Context(), d.ID, hash, newHash, time.Now().Add(refreshTokenTTL)); err != nil {
+	if err := h.store.rotateRefreshToken(r.Context(), d.ID, hash, newHash, time.Now().Add(refreshTokenTTL), clientIP(r), r.UserAgent()); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}

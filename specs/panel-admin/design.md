@@ -1,6 +1,6 @@
 # Panel de administración web — Diseño
 
-Estado: implementado — ver `internal/auth/panel_*.go`, `internal/auth/templates/` y `internal/db/migrations/00014_add_deleted_at_to_users.sql`
+Estado: implementado — ver `internal/auth/panel_*.go`, `internal/auth/templates/`, `internal/settings/`, `internal/db/migrations/00014_add_deleted_at_to_users.sql` y `00015_create_instance_settings.sql`
 
 ## Dónde vive: dentro de `internal/auth`, no un paquete nuevo
 
@@ -13,7 +13,10 @@ y sus métodos son no exportados, y un paquete separado no podría llamarlos.
 
 Archivos nuevos: `panel_session.go` (sesión de cookie + CSRF),
 `panel_handlers.go` (handlers HTML + `PanelRoutes(r chi.Router)`, separado
-de `Routes`), `templates.go` (`//go:embed`), `templates/*.html`.
+de `Routes`), `templates.go` (`//go:embed` de templates y de
+`static/logo.png`), `templates/*.html`, `static/logo.png` (isotipo de
+Logday, copiado de `task-manager/src/assets/logo.png`, usado como favicon
+y logo del header — ver "Look & feel" abajo).
 
 ## Sesión de navegador: cookie propia, no el modelo de device/JWT existente
 
@@ -106,21 +109,120 @@ Nuevos métodos no exportados en `store`:
   por `user_id` (a diferencia de `listDevices`, que sí scopea).
 - `createFirstAdmin` — ver arriba.
 
-`getUserByEmail`/`countUsers`/`countAdmins` excluyen `deleted_at IS NOT
-NULL` — un usuario dado de baja no cuenta como admin activo para ningún
-guard, y no puede loguearse en ningún lado (panel ni API de sync).
+`getUserByEmail`/`countUsers` excluyen `deleted_at IS NOT NULL` — un
+usuario dado de baja no cuenta como admin activo para ningún guard
+(incluida la cuenta transaccional dentro de `withLastAdminGuard`), y no
+puede loguearse en ningún lado (panel ni API de sync).
 
 No hace falta nada nuevo para crear un usuario (`store.createUser` ya
 sirve) ni para revocar un device puntual (`store.deleteDevice(ctx, id)` ya
 existe y ya no scopea por usuario).
+
+### IP y tipo de dispositivo en `/admin/panel/devices`
+
+`devices` no tenía ninguna columna con señal estructurada sobre el
+dispositivo — `device_name` es texto libre que pone el cliente al
+loguearse (p. ej. "Postman", "member-laptop"), no algo confiable para
+clasificar. Migración `00016_add_device_ip_and_agent.sql` agrega
+`last_ip`/`user_agent` (`NOT NULL DEFAULT ''`, así que devices creados
+antes de esta migración simplemente muestran "—"/ícono genérico en vez de
+romper). Se escriben en `login` (creación, `clientIP(r)`/`r.UserAgent()`)
+y de nuevo en cada `refresh` (`rotateRefreshToken`, junto a
+`last_used_at`) — reflejan la conexión **más reciente**, no la original,
+igual criterio que `last_used_at`.
+
+El ícono de tipo de dispositivo en `devices.html` es un método
+`device.IconName()` (heurística por substring sobre el `User-Agent` en
+minúsculas: `ipad`/`tablet` → tablet, `iphone`/`android`/`mobile` →
+smartphone, `postman`/`curl`/`insomnia`/`python-requests`/`httpie` →
+terminal, cualquier otro caso o UA vacío → laptop, el default, que cubre
+tanto el cliente de escritorio de Logday como acceso por navegador). Es
+una heurística deliberadamente simple (no hay dependencia de parseo de
+User-Agent) — el objetivo es una señal visual aproximada para el admin,
+no una clasificación exacta de dispositivo.
 
 ## Templates y ruteo
 
 `html/template` puro (sin dependencia nueva) — autoescape real importa acá:
 `device_name`/`email` son strings de usuario renderizados en HTML.
 Embebido vía `//go:embed templates/*.html`, parseado una vez en
-`NewHandler`. Un `layout.html` con CSS inline mínimo + un archivo por
-página (`setup.html`, `login.html`, `users.html`, `devices.html`).
+`NewHandler`. `partials.html` define bloques compartidos (`head` — CSS
+inline + favicon, `nav` — header con tabs + diálogo de confirmación,
+`theme-toggle-button`/`theme-toggle-script`) más un archivo por página
+(`setup.html`, `login.html`, `users.html`, `devices.html`,
+`settings.html`); `icons.html` define un `{{template "icon-X"}}` por cada
+ícono usado (ver "Look & feel" abajo).
+
+## Look & feel: paleta y componentes reales de Logday, no genéricos
+
+El panel replica el sistema de diseño real de la app de escritorio
+(`task-manager/src/App.css`), no una paleta inventada: variables CSS con
+los mismos valores hex/rgba que usa la app (dark por defecto —
+`--bg-base:#121212`, `--accent:#818cf8`/`#6366f1` — con una variante light
+de los mismos roles), mismo stack de fuente de sistema
+(`-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`),
+mismos radios de borde (`8px` controles, `16px` paneles tipo modal),
+mismos botones sólidos/ghost sin bordes ni sombras. El logo real
+(`static/logo.png`) se usa como favicon y como isotipo del header/cards.
+
+**Tema claro/oscuro**: sigue `prefers-color-scheme` por defecto, pero hay
+un toggle manual (íconos sol/luna de Lucide) que fuerza `data-theme` en
+`<html>` y persiste la elección en `localStorage` — un script mínimo e
+inline en `head` aplica esa elección antes del primer paint, para que no
+haya flash del tema incorrecto. El swap entre ícono sol/ícono luna lo
+resuelve CSS puro (mismos selectores que ya controlan la paleta), no JS.
+
+**Íconos**: copiados literalmente de [Lucide](https://lucide.dev)
+(`lucide-static`, ISC — la misma librería que usa `task-manager` vía
+`lucide-react`) como SVG inline embebido en cada `{{define "icon-X"}}` de
+`icons.html` — sin dependencia de build ni CDN, sizeados vía una clase
+`.icon` (`width/height: 1em`) para escalar con el font-size de alrededor.
+
+**Modales**: `<dialog>` nativo del navegador (`showModal()`/`close()`,
+sin JS framework) para "Crear usuario" y para el diálogo de confirmación
+compartido — con `::backdrop` difuminado y una animación de entrada tipo
+resorte, calcada del `ModalPanel`/`ModalOverlay` real de `task-manager`.
+
+## Confirmación de acciones críticas
+
+Un único `<dialog id="confirm-modal">` por página (definido dentro de
+`nav`, así que aparece en cualquier página que incluya el header — hoy
+usuarios/dispositivos/configuración) intercepta el submit de cualquier
+`<form data-confirm="mensaje" data-confirm-title="título"
+data-confirm-tone="danger">` (el atributo `tone` es opcional, default al
+botón primario/accent en vez de rojo), muestra el mensaje, y solo deja
+pasar el submit real si el usuario confirma — el form original y su campo
+CSRF quedan intactos, el diálogo es puramente un gate de UI delante.
+`form.submit()` (a diferencia de un click real o `.requestSubmit()`) no
+vuelve a disparar el evento `submit`, así que no hay loop.
+
+Acciones marcadas como críticas: cerrar sesión, dar de baja usuario,
+resetear password, revocar device, promover/degradar admin. Deliberadamente
+sin confirmación: restaurar usuario (reversible/bajo riesgo), crear usuario
+(ya pasa por su propio modal de datos), guardar configuración (ajuste
+operativo, no destructivo), generar sugerencia de `JWT_SECRET` (no persiste
+ni aplica nada).
+
+El estilo de `#confirm-modal` está calcado del componente real
+`ConfirmDeleteModal.tsx` de `task-manager` (no de una aproximación genérica
+tipo `SettingsModal`): panel de 320px, `padding` 1.25rem, header compacto
+(ícono `triangle-alert` + título `text-sm font-semibold`, sin botón de
+cierre en X — el real tampoco lo tiene), mensaje `text-xs`
+`color: var(--text-secondary)`, botones pequeños (`0.75rem`,
+`padding: 0.375rem 0.75rem`, `border-radius: 8px`). El color del ícono y
+del botón de confirmar cambian según `data-confirm-tone`: `danger` usa
+rojo (`--danger` para el ícono, `#ef4444`/`#dc2626` hover para el botón
+sólido — los mismos `bg-red-500`/`hover:bg-red-600` de Tailwind que usa el
+componente real, no el token `--danger` genérico del resto del panel, que
+es más claro/`red-400` y ahí solo se usa para texto/íconos); cualquier otro
+tono usa `--accent`/`--accent-strong`. El backdrop es
+`rgba(0,0,0,0.6)` + `blur(4px)` (`bg-black/60 backdrop-blur-sm` de
+Tailwind — `backdrop-blur-sm` es 4px, no 2px). Clic en el backdrop cierra
+el modal (`e.target === dialog` dentro del listener de `click` en el
+`<dialog>`), igual que el `onClick={onClose}` de `ModalOverlay` en el
+cliente real; el modal más grande de "Crear usuario" (formulario, no un
+`ConfirmDeleteModal`) sigue con el tratamiento genérico de `.modal-body`/
+`.modal-header` de más arriba.
 
 Prefijo `/admin/panel/*` para la superficie HTML, separado del JSON
 `POST /admin/users` existente — no es requisito técnico de `chi` (solo
@@ -141,12 +243,66 @@ POST      /admin/panel/users/{id}/restore
 POST      /admin/panel/users/{id}/reset-password
 GET       /admin/panel/devices
 POST      /admin/panel/devices/{id}/revoke
+GET       /admin/panel/settings
+POST      /admin/panel/settings
+POST      /admin/panel/settings/generate-secret
+GET       /admin/static/logo.png
 ```
+
+## Configuración de instancia (`internal/settings`)
+
+Tres constantes que antes vivían hardcodeadas en el código pasan a ser una
+fila única configurable (`instance_settings`, `id` fijo en `1`,
+sembrada por la migración): nombre de la instancia, retención de
+tombstones en días, e intentos/ventana del rate limit de login.
+
+**Por qué es un paquete nuevo y no vive en `internal/auth`**: a
+diferencia del resto del panel, esta config la leen paquetes que no
+tienen nada que ver entre sí (`internal/db` para la purga,
+`internal/auth` para el rate limiter y para el panel mismo) — meterlo
+en `internal/auth` habría obligado a `internal/db` a importar `internal/auth`
+completo por una sola lectura. `internal/settings` sigue el mismo patrón
+ya usado por `internal/task.ChangesSince` et al.: funciones de paquete
+(`Get`/`Update`), no un tipo `store` que otros paquetes no podrían nombrar.
+Sin tipo `store` en absoluto acá, a diferencia de los dominios reales —
+es literalmente una fila, dos funciones, no hay estado que valga la pena
+encapsular en un constructor.
+
+- `internal/db/purge.go`: `PurgeTombstones` ya no usa una constante de 90
+  días — llama `settings.Get` al principio de cada corrida (arranca una
+  vez al boot + una vez por día, nunca un hot path) y usa
+  `cfg.TombstoneRetention()`.
+- `internal/auth/ratelimit.go`: `loginLimiter` ahora guarda un `*sql.DB` y
+  llama `settings.Get` en cada `Allow`/`RecordFailure` — un `SELECT` por
+  PK extra en un intento de login no es un costo real, y así un cambio
+  hecho en el panel aplica de inmediato, sin reiniciar. Si la lectura
+  falla, cae a los mismos valores que hoy son el default (5 intentos/60s)
+  en vez de bloquear todo o dejar todo abierto.
+- El nombre de instancia se lee en cada render de página
+  (`Handler.instanceName`, con el mismo fallback a "Logday Server" si la
+  lectura falla) y se inyecta en `<title>` y en `.brand-name` — todas las
+  page-data structs (`formPageData`, `usersPageData`, `devicesPageData`,
+  `settingsPageData`) llevan un campo `InstanceName`.
+- Validación de rangos en `panelUpdateSettings` (no en `settings.Update`,
+  que solo persiste): nombre 1–60 caracteres, retención 1–3650 días,
+  intentos 1–100, ventana 10–3600 segundos.
+
+**`JWT_SECRET`: generador, no rotación en caliente.** `POST
+/admin/panel/settings/generate-secret` genera un valor con
+`security.GenerateOpaqueToken` (misma primitiva que los refresh tokens
+opacos) y lo muestra una sola vez en un campo de solo lectura con botón de
+copiar — nunca se persiste ni se aplica en runtime. Rotar de verdad la
+clave activa invalidaría todas las sesiones sin aviso y requeriría mover
+la raíz de confianza de JWT de variable de entorno a base de datos —
+decisión de arquitectura aparte, no tomada acá (ver "Fuera de este spec"
+en `requirements.md`).
 
 ## Migración
 
-`00014_add_deleted_at_to_users.sql` — `ALTER TABLE users ADD COLUMN
-deleted_at TEXT` (mismo estilo que `00012_add_purged_before_seq.sql`).
+- `00014_add_deleted_at_to_users.sql` — `ALTER TABLE users ADD COLUMN
+  deleted_at TEXT` (mismo estilo que `00012_add_purged_before_seq.sql`).
+- `00015_create_instance_settings.sql` — crea `instance_settings` con
+  una fila sembrada (`id = 1`, valores default) en la misma migración.
 
 ## Explícitamente pendiente
 

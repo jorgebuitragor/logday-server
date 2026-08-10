@@ -5,18 +5,30 @@
 {{template "head" .}}
 </head>
 <body>
+{{template "theme-toggle-button" "theme-toggle-floating"}}
 <div class="card">
-  <h1>Configurar Logday Server</h1>
-  <p>Todavía no hay ningún administrador. Creá la primera cuenta para empezar.</p>
-  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+  <div class="brand">
+    <img class="brand-logo" src="/admin/static/logo.png" alt="Logday">
+    <span class="brand-name">{{if .InstanceName}}{{.InstanceName}}{{else}}Logday Server{{end}}</span>
+  </div>
+  <h1>Configurar instancia</h1>
+  <p class="hint">Todavía no hay ningún administrador. Creá la primera cuenta para empezar.</p>
+  {{if .Error}}<p class="error">{{template "icon-triangle-alert"}} {{.Error}}</p>{{end}}
   <form method="post" action="/setup">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-    <p><label>Email<br><input type="email" name="email" required value="{{.Email}}"></label></p>
-    <p><label>Contraseña<br><input type="password" name="password" required minlength="8"></label></p>
-    <p><label>Confirmar contraseña<br><input type="password" name="password_confirm" required minlength="8"></label></p>
-    <button type="submit">Crear administrador</button>
+    <label>Email
+      <input type="email" name="email" required value="{{.Email}}">
+    </label>
+    <label>Contraseña
+      <input type="password" name="password" required minlength="8">
+    </label>
+    <label>Confirmar contraseña
+      <input type="password" name="password_confirm" required minlength="8">
+    </label>
+    <button type="submit" class="btn btn-primary">Crear administrador</button>
   </form>
 </div>
+{{template "theme-toggle-script"}}
 </body>
 </html>
 {{end}}

@@ -1,14 +1,19 @@
 package auth
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/jorgebuitragor/logday-server/internal/security"
+	"github.com/jorgebuitragor/logday-server/internal/settings"
 )
 
 // PanelRoutes registers the HTML admin panel — kept separate from
@@ -16,6 +21,8 @@ import (
 // unambiguous when reading route registrations. Like Routes, it
 // registers directly on r (no sub-router / chi.Mount).
 func (h *Handler) PanelRoutes(r chi.Router) {
+	r.Get("/admin/static/logo.png", h.serveLogo)
+
 	r.Get("/setup", h.setupForm)
 	r.Post("/setup", h.setupSubmit)
 
@@ -35,29 +42,71 @@ func (h *Handler) PanelRoutes(r chi.Router) {
 		r.Post("/admin/panel/users/{id}/reset-password", h.panelResetPassword)
 		r.Get("/admin/panel/devices", h.panelDevices)
 		r.Post("/admin/panel/devices/{id}/revoke", h.panelRevokeDevice)
+		r.Get("/admin/panel/settings", h.panelSettings)
+		r.Post("/admin/panel/settings", h.panelUpdateSettings)
+		r.Post("/admin/panel/settings/generate-secret", h.panelGenerateSecret)
 	})
 }
 
+// serveLogo serves the embedded Logday brand mark — used as both the
+// panel's favicon and its header logo. Cached aggressively: it's
+// embedded at compile time, so it only ever changes across a binary
+// upgrade, never at runtime.
+func (h *Handler) serveLogo(w http.ResponseWriter, r *http.Request) {
+	data, err := staticFS.ReadFile("static/logo.png")
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	http.ServeContent(w, r, "logo.png", time.Time{}, bytes.NewReader(data))
+}
+
 type formPageData struct {
-	CSRFToken string
-	Error     string
-	Email     string
+	CSRFToken    string
+	Error        string
+	Email        string
+	InstanceName string
 }
 
 type usersPageData struct {
-	CSRFToken string
-	Error     string
-	Users     []user
+	CSRFToken    string
+	Error        string
+	Users        []user
+	Active       string
+	InstanceName string
 }
 
 type devicesPageData struct {
-	CSRFToken string
-	Error     string
-	Devices   []deviceWithOwner
+	CSRFToken    string
+	Error        string
+	Devices      []deviceWithOwner
+	Active       string
+	InstanceName string
+}
+
+type settingsPageData struct {
+	CSRFToken       string
+	Error           string
+	Active          string
+	Settings        settings.Settings
+	GeneratedSecret string
+	InstanceName    string
 }
 
 func (h *Handler) redirectWithError(w http.ResponseWriter, r *http.Request, path, msg string) {
 	http.Redirect(w, r, path+"?error="+url.QueryEscape(msg), http.StatusFound)
+}
+
+// instanceName reads the configurable instance name (Configuración >
+// General) for the <title>/header brand — falls back to the default
+// rather than failing the whole page render if settings can't be read.
+func (h *Handler) instanceName(ctx context.Context) string {
+	cfg, err := settings.Get(ctx, h.store.db)
+	if err != nil {
+		return "Logday Server"
+	}
+	return cfg.InstanceName
 }
 
 // setupForm serves the one-time "create the first admin" screen. Public
@@ -75,7 +124,7 @@ func (h *Handler) setupForm(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	renderTemplate(w, h.tmpl, http.StatusOK, "setup.html", formPageData{CSRFToken: csrf})
+	renderTemplate(w, h.tmpl, http.StatusOK, "setup.html", formPageData{CSRFToken: csrf, InstanceName: h.instanceName(r.Context())})
 }
 
 func (h *Handler) setupSubmit(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +144,7 @@ func (h *Handler) setupSubmit(w http.ResponseWriter, r *http.Request) {
 	renderSetupError := func(msg string) {
 		csrf, _ := ensureCSRFCookie(w, r)
 		renderTemplate(w, h.tmpl, http.StatusBadRequest, "setup.html",
-			formPageData{CSRFToken: csrf, Error: msg, Email: email})
+			formPageData{CSRFToken: csrf, Error: msg, Email: email, InstanceName: h.instanceName(r.Context())})
 	}
 
 	switch {
@@ -144,7 +193,7 @@ func (h *Handler) panelLoginForm(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	renderTemplate(w, h.tmpl, http.StatusOK, "login.html", formPageData{CSRFToken: csrf})
+	renderTemplate(w, h.tmpl, http.StatusOK, "login.html", formPageData{CSRFToken: csrf, InstanceName: h.instanceName(r.Context())})
 }
 
 func (h *Handler) panelLoginSubmit(w http.ResponseWriter, r *http.Request) {
@@ -162,7 +211,7 @@ func (h *Handler) panelLoginSubmit(w http.ResponseWriter, r *http.Request) {
 
 	renderLoginError := func(status int, msg string) {
 		csrf, _ := ensureCSRFCookie(w, r)
-		renderTemplate(w, h.tmpl, status, "login.html", formPageData{CSRFToken: csrf, Error: msg, Email: email})
+		renderTemplate(w, h.tmpl, status, "login.html", formPageData{CSRFToken: csrf, Error: msg, Email: email, InstanceName: h.instanceName(r.Context())})
 	}
 
 	limitKey := clientIP(r) + ":" + strings.ToLower(email)
@@ -220,7 +269,7 @@ func (h *Handler) panelUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	renderTemplate(w, h.tmpl, http.StatusOK, "users.html",
-		usersPageData{CSRFToken: csrf, Users: users, Error: r.URL.Query().Get("error")})
+		usersPageData{CSRFToken: csrf, Users: users, Error: r.URL.Query().Get("error"), Active: "users", InstanceName: h.instanceName(r.Context())})
 }
 
 func (h *Handler) panelCreateUser(w http.ResponseWriter, r *http.Request) {
@@ -379,7 +428,7 @@ func (h *Handler) panelDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	renderTemplate(w, h.tmpl, http.StatusOK, "devices.html",
-		devicesPageData{CSRFToken: csrf, Devices: devices, Error: r.URL.Query().Get("error")})
+		devicesPageData{CSRFToken: csrf, Devices: devices, Error: r.URL.Query().Get("error"), Active: "devices", InstanceName: h.instanceName(r.Context())})
 }
 
 func (h *Handler) panelRevokeDevice(w http.ResponseWriter, r *http.Request) {
@@ -397,4 +446,98 @@ func (h *Handler) panelRevokeDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/admin/panel/devices", http.StatusFound)
+}
+
+func (h *Handler) panelSettings(w http.ResponseWriter, r *http.Request) {
+	cfg, err := settings.Get(r.Context(), h.store.db)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	csrf, err := ensureCSRFCookie(w, r)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	renderTemplate(w, h.tmpl, http.StatusOK, "settings.html", settingsPageData{
+		CSRFToken:       csrf,
+		Active:          "settings",
+		Settings:        *cfg,
+		Error:           r.URL.Query().Get("error"),
+		GeneratedSecret: r.URL.Query().Get("generated_secret"),
+		InstanceName:    cfg.InstanceName,
+	})
+}
+
+// panelUpdateSettings validates and saves the four operator-tunable
+// settings. Bounds are deliberately generous but not unlimited — wide
+// enough not to get in the way, tight enough to catch a fat-fingered
+// value (e.g. "0" attempts, which would lock every login out including
+// the admin's own).
+func (h *Handler) panelUpdateSettings(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	if !verifyCSRF(r) {
+		http.Error(w, "invalid csrf token", http.StatusForbidden)
+		return
+	}
+
+	name := strings.TrimSpace(r.FormValue("instance_name"))
+	retentionDays, retentionErr := strconv.Atoi(r.FormValue("tombstone_retention_days"))
+	attempts, attemptsErr := strconv.Atoi(r.FormValue("login_rate_limit_attempts"))
+	windowSecs, windowErr := strconv.Atoi(r.FormValue("login_rate_limit_window_seconds"))
+
+	switch {
+	case name == "" || len(name) > 60:
+		h.redirectWithError(w, r, "/admin/panel/settings", "el nombre de la instancia debe tener entre 1 y 60 caracteres")
+		return
+	case retentionErr != nil || retentionDays < 1 || retentionDays > 3650:
+		h.redirectWithError(w, r, "/admin/panel/settings", "la retención de tombstones debe ser un número entre 1 y 3650 días")
+		return
+	case attemptsErr != nil || attempts < 1 || attempts > 100:
+		h.redirectWithError(w, r, "/admin/panel/settings", "el límite de intentos de login debe ser un número entre 1 y 100")
+		return
+	case windowErr != nil || windowSecs < 10 || windowSecs > 3600:
+		h.redirectWithError(w, r, "/admin/panel/settings", "la ventana del límite de login debe ser un número entre 10 y 3600 segundos")
+		return
+	}
+
+	err := settings.Update(r.Context(), h.store.db, settings.Settings{
+		InstanceName:                name,
+		TombstoneRetentionDays:      retentionDays,
+		LoginRateLimitAttempts:      attempts,
+		LoginRateLimitWindowSeconds: windowSecs,
+	})
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/admin/panel/settings", http.StatusFound)
+}
+
+// panelGenerateSecret suggests a new JWT_SECRET value for the operator
+// to copy into their .env — it's never persisted or applied at
+// runtime. Actually rotating the active secret would invalidate every
+// session instantly and without warning, and JWT_SECRET is sourced
+// from the environment by design (see specs/panel-admin/design.md and
+// cmd/server/main.go) — this only helps generate a strong value, using
+// the same primitive already used for opaque refresh tokens.
+func (h *Handler) panelGenerateSecret(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	if !verifyCSRF(r) {
+		http.Error(w, "invalid csrf token", http.StatusForbidden)
+		return
+	}
+
+	raw, _, err := security.GenerateOpaqueToken()
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/admin/panel/settings?generated_secret="+url.QueryEscape(raw), http.StatusFound)
 }

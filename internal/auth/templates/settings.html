@@ -1,0 +1,78 @@
+{{define "settings.html"}}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+{{template "head" .}}
+</head>
+<body>
+{{template "nav" .}}
+<div class="page">
+  <div class="page-header"><h1>Configuración</h1></div>
+  {{if .Error}}<p class="error">{{template "icon-triangle-alert"}} {{.Error}}</p>{{end}}
+
+  <form method="post" action="/admin/panel/settings">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+
+    <h3>General</h3>
+    <div class="field-group">
+      <label>Nombre de la instancia
+        <input type="text" name="instance_name" required maxlength="60" value="{{.Settings.InstanceName}}">
+      </label>
+      <p class="hint">Se muestra en el header del panel y en el título de la pestaña.</p>
+    </div>
+
+    <h3>Sincronización</h3>
+    <div class="field-group">
+      <label>Retención de tombstones (días)
+        <input type="text" inputmode="numeric" pattern="[0-9]*" name="tombstone_retention_days" required value="{{.Settings.TombstoneRetentionDays}}">
+      </label>
+      <p class="hint">Cuánto tiempo se guardan los borrados antes de purgarse físicamente. Un cursor de sync más viejo que esto recibe <code>410</code> y necesita un resync completo. Entre 1 y 3650 días.</p>
+    </div>
+
+    <h3>Seguridad</h3>
+    <div class="field-group">
+      <label>Intentos de login permitidos
+        <input type="text" inputmode="numeric" pattern="[0-9]*" name="login_rate_limit_attempts" required value="{{.Settings.LoginRateLimitAttempts}}">
+      </label>
+      <label>Ventana del límite (segundos)
+        <input type="text" inputmode="numeric" pattern="[0-9]*" name="login_rate_limit_window_seconds" required value="{{.Settings.LoginRateLimitWindowSeconds}}">
+      </label>
+      <p class="hint">Aplica tanto al login del panel como al de la API de sync. Cambia en caliente, sin reiniciar.</p>
+    </div>
+
+    <button type="submit" class="btn btn-primary">{{template "icon-save"}} Guardar cambios</button>
+  </form>
+
+  <h3>JWT_SECRET</h3>
+  <div class="field-group">
+    <p class="hint">
+      Firma los access tokens. Se lee de la variable de entorno <code>JWT_SECRET</code> al arrancar el
+      contenedor — este panel no puede rotarlo en caliente (cambiar la clave activa sin avisar invalidaría
+      todas las sesiones de golpe). Generá un valor nuevo acá, pegalo en tu <code>.env</code> y reiniciá
+      el contenedor para aplicarlo.
+    </p>
+    {{if .GeneratedSecret}}
+    <div class="secret-box">
+      <input type="text" readonly value="{{.GeneratedSecret}}" id="generated-secret" onclick="this.select()">
+      <button type="button" class="btn btn-ghost icon-btn" id="copy-secret-btn" aria-label="Copiar">{{template "icon-copy"}}</button>
+    </div>
+    <script>
+      (function () {
+        var btn = document.getElementById('copy-secret-btn');
+        var input = document.getElementById('generated-secret');
+        if (!btn || !input) return;
+        btn.addEventListener('click', function () {
+          navigator.clipboard.writeText(input.value);
+        });
+      })();
+    </script>
+    {{end}}
+    <form method="post" action="/admin/panel/settings/generate-secret">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <button type="submit" class="btn btn-ghost">{{template "icon-refresh-cw"}} Generar secreto nuevo</button>
+    </form>
+  </div>
+</div>
+</body>
+</html>
+{{end}}

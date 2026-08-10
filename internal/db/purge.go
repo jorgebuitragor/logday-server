@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"time"
-)
 
-const tombstoneRetention = 90 * 24 * time.Hour
+	"github.com/jorgebuitragor/logday-server/internal/settings"
+)
 
 // domainTables lists every table with the standard
 // (user_id, seq, deleted_at) shape that participates in soft-delete +
@@ -19,13 +19,18 @@ var domainTables = []string{
 }
 
 // PurgeTombstones physically deletes soft-deleted rows older than the
-// 90-day retention window from every domain table, recording per-user
-// how far the purge reached (user_sync_counters.purged_before_seq) so
-// GET /sync/changes can detect a cursor that's now too old to answer
-// completely and reject it (410) instead of silently omitting the
-// tombstones it missed.
+// retention window (instance_settings.tombstone_retention_days,
+// configurable from the admin panel — 90 days by default) from every
+// domain table, recording per-user how far the purge reached
+// (user_sync_counters.purged_before_seq) so GET /sync/changes can
+// detect a cursor that's now too old to answer completely and reject
+// it (410) instead of silently omitting the tombstones it missed.
 func PurgeTombstones(ctx context.Context, database *sql.DB) error {
-	cutoff := time.Now().UTC().Add(-tombstoneRetention).Format(time.RFC3339Nano)
+	cfg, err := settings.Get(ctx, database)
+	if err != nil {
+		return fmt.Errorf("reading tombstone retention setting: %w", err)
+	}
+	cutoff := time.Now().UTC().Add(-cfg.TombstoneRetention()).Format(time.RFC3339Nano)
 
 	tx, err := database.BeginTx(ctx, nil)
 	if err != nil {

@@ -495,3 +495,90 @@ func TestPanelUserAndDeviceLifecycle(t *testing.T) {
 		}
 	}
 }
+
+func TestPanelSettingsPage(t *testing.T) {
+	srv, _, authStore := setupPanelServer(t)
+	mustCreatePanelAdmin(t, authStore, "admin@example.com", "correct-horse-battery")
+
+	client := newPanelClient(t)
+	loginToPanel(t, client, srv, "admin@example.com", "correct-horse-battery")
+
+	csrfFor := func(path string) string {
+		body, _ := getAndScrapeCSRF(t, client, srv, path)
+		return scrapeCSRF(t, body)
+	}
+
+	// GET shows the migration-seeded defaults, and the instance name
+	// (still the default here) rendered into the page <title>.
+	body, resp := getAndScrapeCSRF(t, client, srv, "/admin/panel/settings")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /admin/panel/settings: expected 200, got %d", resp.StatusCode)
+	}
+	if !strings.Contains(body, `value="Logday Server"`) {
+		t.Fatalf("expected the default instance name in the form, got:\n%s", body)
+	}
+	if !strings.Contains(body, "<title>Logday Server — Admin</title>") {
+		t.Fatalf("expected the default instance name in <title>, got:\n%s", body)
+	}
+
+	// Invalid submission (name required) is rejected and doesn't touch
+	// the stored settings.
+	resp = postForm(t, client, srv, "/admin/panel/settings", url.Values{
+		"csrf_token":                      {csrfFor("/admin/panel/settings")},
+		"instance_name":                   {""},
+		"tombstone_retention_days":        {"90"},
+		"login_rate_limit_attempts":       {"5"},
+		"login_rate_limit_window_seconds": {"60"},
+	})
+	_ = resp.Body.Close()
+	if !strings.Contains(resp.Header.Get("Location"), "error=") {
+		t.Fatalf("expected an empty instance name to be rejected with an error redirect, got Location=%q", resp.Header.Get("Location"))
+	}
+
+	// Valid submission updates the settings and the change shows up on
+	// the very next render — instance name, the JSON-API-facing pieces
+	// are covered separately (rate limiter/purge tests read the store
+	// directly).
+	resp = postForm(t, client, srv, "/admin/panel/settings", url.Values{
+		"csrf_token":                      {csrfFor("/admin/panel/settings")},
+		"instance_name":                   {"Equipo de Producto"},
+		"tombstone_retention_days":        {"30"},
+		"login_rate_limit_attempts":       {"10"},
+		"login_rate_limit_window_seconds": {"120"},
+	})
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/admin/panel/settings" {
+		t.Fatalf("valid settings update: expected 302 to /admin/panel/settings, got %d Location=%q",
+			resp.StatusCode, resp.Header.Get("Location"))
+	}
+
+	body2, resp2 := getAndScrapeCSRF(t, client, srv, "/admin/panel/settings")
+	_ = resp2.Body.Close()
+	if !strings.Contains(body2, "<title>Equipo de Producto — Admin</title>") {
+		t.Fatalf("expected the updated instance name in <title>, got:\n%s", body2)
+	}
+	if !strings.Contains(body2, `value="30"`) {
+		t.Fatalf("expected the updated retention days in the form, got:\n%s", body2)
+	}
+
+	// Generate-secret redirects back with a suggested value, shown
+	// once in the readonly field — never persisted anywhere.
+	resp3 := postForm(t, client, srv, "/admin/panel/settings/generate-secret",
+		url.Values{"csrf_token": {csrfFor("/admin/panel/settings")}})
+	_ = resp3.Body.Close()
+	loc := resp3.Header.Get("Location")
+	if resp3.StatusCode != http.StatusFound || !strings.Contains(loc, "generated_secret=") {
+		t.Fatalf("generate-secret: expected 302 with generated_secret in Location, got %d Location=%q", resp3.StatusCode, loc)
+	}
+
+	genResp, err := client.Get(srv.URL + loc)
+	if err != nil {
+		t.Fatalf("following generate-secret redirect: %v", err)
+	}
+	genBody, _ := io.ReadAll(genResp.Body)
+	_ = genResp.Body.Close()
+	if !strings.Contains(string(genBody), `id="generated-secret"`) {
+		t.Fatalf("expected the generated secret field to render, got:\n%s", genBody)
+	}
+}

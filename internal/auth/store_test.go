@@ -107,7 +107,7 @@ func TestSoftDeleteUserRevokesDevicesAndBlocksLogin(t *testing.T) {
 
 	admin := mustCreateUser(t, s, ctx, "admin@example.com", true)
 	member := mustCreateUser(t, s, ctx, "member@example.com", false)
-	if _, err := s.createDevice(ctx, member.ID, "laptop", "somehash", time.Now().Add(time.Hour)); err != nil {
+	if _, err := s.createDevice(ctx, member.ID, "laptop", "somehash", time.Now().Add(time.Hour), "127.0.0.1", "test-agent"); err != nil {
 		t.Fatalf("createDevice: %v", err)
 	}
 
@@ -165,7 +165,7 @@ func TestUpdateUserPasswordRevokesDevices(t *testing.T) {
 	ctx := context.Background()
 
 	member := mustCreateUser(t, s, ctx, "member@example.com", false)
-	if _, err := s.createDevice(ctx, member.ID, "laptop", "somehash", time.Now().Add(time.Hour)); err != nil {
+	if _, err := s.createDevice(ctx, member.ID, "laptop", "somehash", time.Now().Add(time.Hour), "127.0.0.1", "test-agent"); err != nil {
 		t.Fatalf("createDevice: %v", err)
 	}
 
@@ -196,10 +196,10 @@ func TestListAllDevicesIsUnscopedAndIncludesOwnerEmail(t *testing.T) {
 
 	a := mustCreateUser(t, s, ctx, "a@example.com", true)
 	b := mustCreateUser(t, s, ctx, "b@example.com", false)
-	if _, err := s.createDevice(ctx, a.ID, "a-laptop", "hash-a", time.Now().Add(time.Hour)); err != nil {
+	if _, err := s.createDevice(ctx, a.ID, "a-laptop", "hash-a", time.Now().Add(time.Hour), "10.0.0.1", "device-a-agent"); err != nil {
 		t.Fatalf("createDevice a: %v", err)
 	}
-	if _, err := s.createDevice(ctx, b.ID, "b-phone", "hash-b", time.Now().Add(time.Hour)); err != nil {
+	if _, err := s.createDevice(ctx, b.ID, "b-phone", "hash-b", time.Now().Add(time.Hour), "10.0.0.2", "device-b-agent"); err != nil {
 		t.Fatalf("createDevice b: %v", err)
 	}
 

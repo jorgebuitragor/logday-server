@@ -6,63 +6,99 @@
 </head>
 <body>
 {{template "nav" .}}
-<h2>Usuarios</h2>
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<div class="page">
+  <div class="page-header">
+    <h1>Usuarios</h1>
+    <button type="button" class="btn btn-primary" onclick="document.getElementById('create-user-modal').showModal()">
+      {{template "icon-user-plus"}} Crear usuario
+    </button>
+  </div>
+  {{if .Error}}<p class="error">{{template "icon-triangle-alert"}} {{.Error}}</p>{{end}}
 
-<table>
-<tr><th>Email</th><th>Rol</th><th>Creado</th><th>Acciones</th></tr>
-{{range .Users}}{{if not .DeletedAt}}
-<tr>
-  <td>{{.Email}}</td>
-  <td>{{if .IsAdmin}}admin{{else}}usuario{{end}}</td>
-  <td>{{.CreatedAt.Format "2006-01-02"}}</td>
-  <td>
-    <form class="inline" method="post" action="/admin/panel/users/{{.ID}}/{{if .IsAdmin}}demote{{else}}promote{{end}}">
-      <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-      <button type="submit">{{if .IsAdmin}}Quitar admin{{else}}Hacer admin{{end}}</button>
-    </form>
-    <form class="inline" method="post" action="/admin/panel/users/{{.ID}}/delete">
-      <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-      <button type="submit">Dar de baja</button>
-    </form>
-    <details>
-      <summary>Resetear password</summary>
-      <form method="post" action="/admin/panel/users/{{.ID}}/reset-password">
+  <table>
+  <tr><th>Email</th><th>Rol</th><th>Creado</th><th>Acciones</th></tr>
+  {{range .Users}}{{if not .DeletedAt}}
+  <tr>
+    <td>{{.Email}}</td>
+    <td>
+      {{if .IsAdmin}}<span class="badge badge-admin">admin</span>{{else}}<span class="badge badge-user">usuario</span>{{end}}
+    </td>
+    <td>{{.CreatedAt.Format "2006-01-02"}}</td>
+    <td>
+      <div class="row-actions">
+        <form class="inline" method="post" action="/admin/panel/users/{{.ID}}/{{if .IsAdmin}}demote{{else}}promote{{end}}"
+              data-confirm="{{if .IsAdmin}}{{.Email}} va a perder los permisos de administrador.{{else}}{{.Email}} va a tener acceso completo de administrador sobre esta instancia.{{end}}"
+              data-confirm-title="{{if .IsAdmin}}Quitar admin{{else}}Hacer admin{{end}}"
+              {{if .IsAdmin}}data-confirm-tone="danger"{{end}}>
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <button type="submit" class="btn btn-ghost">
+            {{if .IsAdmin}}{{template "icon-shield-off"}} Quitar admin{{else}}{{template "icon-shield-check"}} Hacer admin{{end}}
+          </button>
+        </form>
+        <form class="inline" method="post" action="/admin/panel/users/{{.ID}}/delete"
+              data-confirm="{{.Email}} no va a poder iniciar sesión hasta que lo restaures. Se revocan todas sus sesiones activas."
+              data-confirm-title="Dar de baja usuario"
+              data-confirm-tone="danger">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <button type="submit" class="btn btn-danger">{{template "icon-user-x"}} Dar de baja</button>
+        </form>
+        <details>
+          <summary>{{template "icon-key-round"}} Resetear password</summary>
+          <form method="post" action="/admin/panel/users/{{.ID}}/reset-password"
+                data-confirm="Se revocan todas las sesiones activas de {{.Email}} — va a tener que volver a iniciar sesión con la contraseña nueva."
+                data-confirm-title="Resetear contraseña"
+                data-confirm-tone="danger">
+            <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+            <input type="password" name="password" required minlength="8" placeholder="Nueva contraseña">
+            <button type="submit" class="btn btn-primary">Guardar</button>
+          </form>
+        </details>
+      </div>
+    </td>
+  </tr>
+  {{end}}{{end}}
+  </table>
+
+  <h3>Usuarios dados de baja</h3>
+  <table>
+  <tr><th>Email</th><th>Baja</th><th>Acciones</th></tr>
+  {{range .Users}}{{if .DeletedAt}}
+  <tr class="deleted">
+    <td>{{.Email}}</td>
+    <td>{{.DeletedAt.Format "2006-01-02"}}</td>
+    <td>
+      <form class="inline" method="post" action="/admin/panel/users/{{.ID}}/restore">
         <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-        <input type="password" name="password" required minlength="8" placeholder="Nueva contraseña">
-        <button type="submit">Guardar</button>
+        <button type="submit" class="btn btn-ghost">{{template "icon-rotate-ccw"}} Restaurar</button>
       </form>
-    </details>
-  </td>
-</tr>
-{{end}}{{end}}
-</table>
+    </td>
+  </tr>
+  {{end}}{{end}}
+  </table>
+</div>
 
-<h3>Usuarios dados de baja</h3>
-<table>
-<tr><th>Email</th><th>Baja</th><th>Acciones</th></tr>
-{{range .Users}}{{if .DeletedAt}}
-<tr class="deleted">
-  <td>{{.Email}}</td>
-  <td>{{.DeletedAt.Format "2006-01-02"}}</td>
-  <td>
-    <form class="inline" method="post" action="/admin/panel/users/{{.ID}}/restore">
-      <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-      <button type="submit">Restaurar</button>
-    </form>
-  </td>
-</tr>
-{{end}}{{end}}
-</table>
-
-<h3>Crear usuario</h3>
-<form method="post" action="/admin/panel/users">
-  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-  <p><label>Email<br><input type="email" name="email" required></label></p>
-  <p><label>Contraseña<br><input type="password" name="password" required minlength="8"></label></p>
-  <p><label><input type="checkbox" name="is_admin"> Admin</label></p>
-  <button type="submit">Crear</button>
-</form>
+<dialog id="create-user-modal" class="modal">
+  <form method="post" action="/admin/panel/users" class="modal-body">
+    <div class="modal-header">
+      <h2>Crear usuario</h2>
+      <button type="button" class="btn btn-ghost icon-btn" onclick="document.getElementById('create-user-modal').close()" aria-label="Cerrar">
+        {{template "icon-x"}}
+      </button>
+    </div>
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <label>Email
+      <input type="email" name="email" required>
+    </label>
+    <label>Contraseña
+      <input type="password" name="password" required minlength="8">
+    </label>
+    <label class="checkbox"><input type="checkbox" name="is_admin"> Admin</label>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" onclick="document.getElementById('create-user-modal').close()">Cancelar</button>
+      <button type="submit" class="btn btn-primary">{{template "icon-user-plus"}} Crear</button>
+    </div>
+  </form>
+</dialog>
 </body>
 </html>
 {{end}}

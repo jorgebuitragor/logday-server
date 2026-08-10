@@ -6,24 +6,38 @@
 </head>
 <body>
 {{template "nav" .}}
-<h2>Dispositivos</h2>
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
-<table>
-<tr><th>Usuario</th><th>Dispositivo</th><th>Último uso</th><th>Acciones</th></tr>
-{{range .Devices}}
-<tr>
-  <td>{{.OwnerEmail}}</td>
-  <td>{{.DeviceName}}</td>
-  <td>{{.LastUsedAt.Format "2006-01-02 15:04"}}</td>
-  <td>
-    <form class="inline" method="post" action="/admin/panel/devices/{{.ID}}/revoke">
-      <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-      <button type="submit">Revocar</button>
-    </form>
-  </td>
-</tr>
-{{end}}
-</table>
+<div class="page">
+  <h1>Dispositivos</h1>
+  {{if .Error}}<p class="error">{{template "icon-triangle-alert"}} {{.Error}}</p>{{end}}
+  <table>
+  <tr><th>Usuario</th><th>Dispositivo</th><th>IP</th><th>Último uso</th><th>Acciones</th></tr>
+  {{range .Devices}}
+  <tr>
+    <td>{{.OwnerEmail}}</td>
+    <td>
+      <span class="device-cell">
+        {{if eq .IconName "smartphone"}}{{template "icon-smartphone"}}
+        {{else if eq .IconName "tablet"}}{{template "icon-tablet"}}
+        {{else if eq .IconName "terminal"}}{{template "icon-terminal"}}
+        {{else}}{{template "icon-laptop"}}{{end}}
+        {{.DeviceName}}
+      </span>
+    </td>
+    <td>{{if .LastIP}}{{.LastIP}}{{else}}—{{end}}</td>
+    <td>{{.LastUsedAt.Format "2006-01-02 15:04"}}</td>
+    <td>
+      <form class="inline" method="post" action="/admin/panel/devices/{{.ID}}/revoke"
+            data-confirm="{{.OwnerEmail}} va a tener que volver a iniciar sesión en “{{.DeviceName}}”."
+            data-confirm-title="Revocar dispositivo"
+            data-confirm-tone="danger">
+        <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+        <button type="submit" class="btn btn-danger">{{template "icon-x-circle"}} Revocar</button>
+      </form>
+    </td>
+  </tr>
+  {{end}}
+  </table>
+</div>
 </body>
 </html>
 {{end}}

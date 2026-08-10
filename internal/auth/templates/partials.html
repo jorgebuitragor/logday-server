@@ -1,30 +1,405 @@
 {{define "head"}}
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Logday Server — Admin</title>
+<title>{{if .InstanceName}}{{.InstanceName}}{{else}}Logday Server{{end}} — Admin</title>
+<link rel="icon" type="image/png" href="/admin/static/logo.png">
+<script>
+  // Applied synchronously, before first paint, so there's no flash of
+  // the wrong theme on load — reads the explicit choice saved by the
+  // toggle button (theme-toggle-script below); no choice saved yet
+  // just falls through to the CSS-only prefers-color-scheme default.
+  (function () {
+    var saved = localStorage.getItem('logday_admin_theme');
+    if (saved === 'light' || saved === 'dark') {
+      document.documentElement.setAttribute('data-theme', saved);
+    }
+  })();
+</script>
 <style>
-  body { font-family: system-ui, -apple-system, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; line-height: 1.5; }
-  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
-  th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid #ddd; }
+  :root {
+    --bg-base:     #121212;
+    --bg-panel:    #141414;
+    --bg-surface:  #1c1c1c;
+    --bg-hover:    #242424;
+    --bg-elevated: #181818;
+    --bg-input:    #161616;
+    --border:      #2a2a2a;
+    --border-card: #333333;
+    --border-high: #4a4a4a;
+    --text-primary:   #f2f2f2;
+    --text-body:      #e4e4e4;
+    --text-secondary: #c8c8c8;
+    --text-tertiary:  #aaaaaa;
+    --text-muted:     #888888;
+    --text-hint:      #848484;
+    --accent:        #818cf8;
+    --accent-strong: #6366f1;
+    --accent-soft:   rgba(129, 140, 248, 0.22);
+    --accent-ink:    #c7d2fe;
+    --danger:        #f87171;
+    --shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+  }
+  /* Light tokens apply either automatically (OS preference, unless the
+     user explicitly picked dark) or when explicitly picked via the
+     theme toggle (data-theme="light", wins regardless of OS). */
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg-base:     #f4f4f5;
+      --bg-panel:    #ffffff;
+      --bg-surface:  #f9f9fb;
+      --bg-hover:    #f0f0f2;
+      --bg-elevated: #ffffff;
+      --bg-input:    #fafafa;
+      --border:      #e4e4e7;
+      --border-card: #d4d4d8;
+      --border-high: #a1a1aa;
+      --text-primary:   #09090b;
+      --text-body:      #18181b;
+      --text-secondary: #3f3f46;
+      --text-tertiary:  #52525b;
+      --text-muted:     #71717a;
+      --text-hint:      #a1a1aa;
+      --accent:        #6366f1;
+      --accent-strong: #4f46e5;
+      --accent-soft:   rgba(99, 102, 241, 0.18);
+      --accent-ink:    #4f46e5;
+      --shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg-base:     #f4f4f5;
+    --bg-panel:    #ffffff;
+    --bg-surface:  #f9f9fb;
+    --bg-hover:    #f0f0f2;
+    --bg-elevated: #ffffff;
+    --bg-input:    #fafafa;
+    --border:      #e4e4e7;
+    --border-card: #d4d4d8;
+    --border-high: #a1a1aa;
+    --text-primary:   #09090b;
+    --text-body:      #18181b;
+    --text-secondary: #3f3f46;
+    --text-tertiary:  #52525b;
+    --text-muted:     #71717a;
+    --text-hint:      #a1a1aa;
+    --accent:        #6366f1;
+    --accent-strong: #4f46e5;
+    --accent-soft:   rgba(99, 102, 241, 0.18);
+    --accent-ink:    #4f46e5;
+    --shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    background: var(--bg-base);
+    color: var(--text-body);
+  }
+  a { color: var(--accent); }
+
+  .page { max-width: 960px; margin: 0 auto; padding: 0 1.5rem 3rem; }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 2rem;
+  }
+  .brand { display: flex; align-items: center; gap: 0.6rem; margin-right: auto; }
+  .brand-logo { width: 26px; height: 26px; border-radius: 7px; display: block; }
+  .brand-name { font-weight: 600; font-size: 0.95rem; color: var(--text-primary); }
+  .tabs { display: flex; }
+  .tab {
+    padding: 0.5rem 0.1rem;
+    margin: 0 0.9rem;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-decoration: none;
+    border-bottom: 2px solid transparent;
+  }
+  .tab:hover { color: var(--text-primary); }
+  .tab-active { color: var(--accent); border-bottom-color: var(--accent-strong); }
+
+  .page-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 1.5rem;
+  }
+  .page-header h1 { margin: 0; }
+
+  h1 { font-size: 1.15rem; font-weight: 600; color: var(--text-primary); margin: 0 0 1.5rem; }
+  h2 { font-size: 1rem; font-weight: 600; color: var(--text-primary); margin: 0 0 1rem; }
+  h3 {
+    font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-tertiary); margin: 2.5rem 0 0.75rem;
+  }
+  p.hint { color: var(--text-muted); font-size: 0.85rem; }
+
+  table { width: 100%; border-collapse: collapse; margin: 0 0 1.5rem; }
+  th {
+    text-align: left; padding: 0.5rem 0.75rem; font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary);
+    background: var(--bg-surface); border-bottom: 1px solid var(--border);
+  }
+  td { padding: 0.6rem 0.75rem; font-size: 0.82rem; color: var(--text-primary); border-bottom: 1px solid var(--border); }
+  tr.deleted td { color: var(--text-muted); }
+  .device-cell { display: inline-flex; align-items: center; gap: 0.45rem; }
+  .device-cell .icon { color: var(--text-muted); }
+
+  .badge {
+    display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px;
+    font-size: 0.7rem; font-weight: 600;
+  }
+  .badge-admin { background: var(--accent-soft); color: var(--accent-ink); }
+  .badge-user { background: var(--bg-hover); color: var(--text-muted); }
+
+  label { display: block; font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 1rem; }
+  label > input { margin-top: 0.4rem; }
+  label.checkbox { display: flex; align-items: center; gap: 0.5rem; }
+  label.checkbox > input { margin-top: 0; }
+
+  input[type=email], input[type=password], input[type=text] {
+    width: 100%; border-radius: 8px; border: 1px solid var(--border-high);
+    background: var(--bg-input); color: var(--text-primary);
+    padding: 0.55rem 0.75rem; font: inherit; font-size: 0.85rem; outline: none;
+  }
+  input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  input[type=checkbox] { accent-color: var(--accent-strong); }
+
+  .btn {
+    border: none; border-radius: 8px; padding: 0.5rem 1rem;
+    font: inherit; font-size: 0.8rem; font-weight: 500; cursor: pointer;
+    transition: background-color .15s ease, color .15s ease;
+  }
+  .btn-primary { background: var(--accent-strong); color: #fff; }
+  .btn-primary:hover { background: var(--accent); }
+  .btn-ghost { background: transparent; color: var(--text-muted); }
+  .btn-ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .btn-danger { background: transparent; color: var(--danger); }
+  .btn-danger:hover { background: rgba(248, 113, 113, 0.12); }
+  .btn-danger-solid { background: #ef4444; color: #fff; }
+  .btn-danger-solid:hover { background: #dc2626; }
+  .icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 0.45rem; border-radius: 8px;
+  }
+  .theme-toggle-floating { position: fixed; top: 1.25rem; right: 1.25rem; }
   form.inline { display: inline; }
-  input[type=email], input[type=password], input[type=text] { padding: 0.4rem 0.6rem; font: inherit; width: 100%; max-width: 320px; box-sizing: border-box; }
-  button { font: inherit; padding: 0.4rem 0.8rem; cursor: pointer; }
-  .error { color: #b00020; background: #fdecea; padding: 0.6rem; border-radius: 4px; }
-  .card { max-width: 380px; margin: 3rem auto; }
-  nav { margin-bottom: 1.5rem; border-bottom: 1px solid #ddd; padding-bottom: 1rem; }
-  nav a { margin-right: 1rem; }
-  .deleted { opacity: 0.6; }
+  .row-actions { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+
+  .icon { width: 1em; height: 1em; flex-shrink: 0; }
+  .btn { display: inline-flex; align-items: center; gap: 0.4rem; }
+  .tab { display: inline-flex; align-items: center; gap: 0.4rem; }
+
+  /* The toggle button renders both icons; CSS (mirroring the same
+     selectors used for the color tokens above) shows only the one that
+     represents "click to switch to the *other* theme" for whichever
+     theme is currently active. */
+  #theme-toggle-btn .icon-moon { display: none; }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) #theme-toggle-btn .icon-sun { display: none; }
+    :root:not([data-theme="dark"]) #theme-toggle-btn .icon-moon { display: inline-block; }
+  }
+  :root[data-theme="light"] #theme-toggle-btn .icon-sun { display: none; }
+  :root[data-theme="light"] #theme-toggle-btn .icon-moon { display: inline-block; }
+
   details { display: inline-block; }
+  summary { cursor: pointer; font-size: 0.78rem; color: var(--accent); list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+  details form { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.5rem; }
+  details input[type=password] { width: auto; flex: 1; }
+
+  .error {
+    color: var(--danger); background: rgba(248, 113, 113, 0.12);
+    border: 1px solid rgba(248, 113, 113, 0.3); border-radius: 8px;
+    padding: 0.65rem 0.9rem; margin-bottom: 1.25rem; font-size: 0.85rem;
+  }
+
+  .card {
+    max-width: 380px; margin: 4rem auto; padding: 2rem;
+    background: var(--bg-elevated); border: 1px solid var(--border-card);
+    border-radius: 16px; box-shadow: var(--shadow);
+  }
+  .card .brand { justify-content: center; margin: 0 0 1.5rem; }
+  .card h1 { text-align: center; margin-bottom: 0.4rem; }
+  .card p.hint { text-align: center; margin: 0 0 1.5rem; }
+  .card .btn-primary { width: 100%; padding: 0.6rem; margin-top: 0.5rem; }
+
+  dialog.modal {
+    width: 100%; max-width: 420px; margin: auto; padding: 0;
+    background: var(--bg-elevated); color: var(--text-body);
+    border: 1px solid var(--border-card); border-radius: 16px; box-shadow: var(--shadow);
+  }
+  dialog.modal::backdrop { background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px); }
+  dialog.modal[open] { animation: modal-spring-in 0.22s cubic-bezier(0.34, 1.56, 0.64, 1); }
+  @keyframes modal-spring-in {
+    from { opacity: 0; transform: scale(0.96) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .modal-body { padding: 1.5rem; }
+  .modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 1.25rem;
+  }
+  .modal-header h2 { margin: 0; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
+
+  /* confirm-modal: calcado del tamaño/tipografía real de
+     ConfirmDeleteModal de Logday (w-80 p-5, título text-sm + ícono,
+     mensaje text-xs, botones pequeños) — no el tratamiento genérico
+     más grande de arriba, que sigue usando create-user-modal. */
+  #confirm-modal { width: 320px; }
+  #confirm-modal .modal-body { padding: 1.25rem; }
+  #confirm-modal .modal-header {
+    justify-content: flex-start; gap: 0.5rem; margin-bottom: 0.25rem;
+  }
+  #confirm-modal .modal-header h2 { font-size: 0.85rem; font-weight: 600; }
+  #confirm-modal .modal-header .icon { color: var(--accent); flex-shrink: 0; }
+  #confirm-modal .modal-header.tone-danger .icon { color: var(--danger); }
+  #confirm-modal-message { font-size: 0.75rem; line-height: 1.5; color: var(--text-secondary); margin: 0 0 1rem; }
+  #confirm-modal .modal-actions { margin-top: 0; }
+  #confirm-modal .modal-actions .btn { font-size: 0.75rem; padding: 0.375rem 0.75rem; border-radius: 8px; }
+
+  .field-group { max-width: 420px; margin-bottom: 1.75rem; }
+  code {
+    background: var(--bg-surface); border: 1px solid var(--border);
+    padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.85em;
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  }
+  .secret-box { display: flex; gap: 0.5rem; align-items: center; margin: 0.75rem 0 1rem; max-width: 480px; }
+  .secret-box input {
+    font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 0.78rem;
+    background: var(--bg-surface);
+  }
 </style>
 {{end}}
 
 {{define "nav"}}
-<nav>
-  <a href="/admin/panel">Usuarios</a>
-  <a href="/admin/panel/devices">Dispositivos</a>
-  <form class="inline" method="post" action="/admin/panel/logout">
+<header class="topbar">
+  <div class="brand">
+    <img class="brand-logo" src="/admin/static/logo.png" alt="Logday">
+    <span class="brand-name">{{if .InstanceName}}{{.InstanceName}}{{else}}Logday Server{{end}}</span>
+  </div>
+  <nav class="tabs">
+    <a class="tab{{if eq .Active "users"}} tab-active{{end}}" href="/admin/panel">{{template "icon-users"}} Usuarios</a>
+    <a class="tab{{if eq .Active "devices"}} tab-active{{end}}" href="/admin/panel/devices">{{template "icon-laptop"}} Dispositivos</a>
+    <a class="tab{{if eq .Active "settings"}} tab-active{{end}}" href="/admin/panel/settings">{{template "icon-settings"}} Configuración</a>
+  </nav>
+  {{template "theme-toggle-button" ""}}
+  <form class="inline" method="post" action="/admin/panel/logout"
+        data-confirm="Vas a tener que volver a iniciar sesión para acceder al panel de nuevo."
+        data-confirm-title="Cerrar sesión">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-    <button type="submit">Cerrar sesión</button>
+    <button type="submit" class="btn btn-ghost">{{template "icon-log-out"}} Cerrar sesión</button>
   </form>
-</nav>
+</header>
+{{template "theme-toggle-script"}}
+{{template "confirm-dialog"}}
+{{end}}
+
+{{/* confirm-dialog is a single shared <dialog> per page: any
+     <form data-confirm="mensaje" data-confirm-title="título"
+     data-confirm-tone="danger"> (tone optional, defaults to the
+     primary/accent button) has its submit intercepted, shows this
+     dialog with that form's message, and only actually submits once
+     the user clicks the dialog's own confirm button — the original
+     form/CSRF field is untouched, this is purely a UI gate in front of
+     it. */}}
+{{define "confirm-dialog"}}
+<dialog id="confirm-modal" class="modal">
+  <div class="modal-body">
+    <div class="modal-header" id="confirm-modal-header">
+      {{template "icon-triangle-alert"}}
+      <h2 id="confirm-modal-title">Confirmar acción</h2>
+    </div>
+    <p id="confirm-modal-message"></p>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="confirm-modal-cancel">Cancelar</button>
+      <button type="button" class="btn btn-primary" id="confirm-modal-confirm">Confirmar</button>
+    </div>
+  </div>
+</dialog>
+<script>
+(function () {
+  var dialog = document.getElementById('confirm-modal');
+  if (!dialog) return;
+  var headerEl = document.getElementById('confirm-modal-header');
+  var titleEl = document.getElementById('confirm-modal-title');
+  var messageEl = document.getElementById('confirm-modal-message');
+  var confirmBtn = document.getElementById('confirm-modal-confirm');
+  var cancelBtn = document.getElementById('confirm-modal-cancel');
+  var pendingForm = null;
+
+  // Delegated on document instead of a one-time
+  // querySelectorAll('form[data-confirm]').forEach(...) here: this
+  // script tag sits inside the shared header (nav), which renders
+  // *before* the page's own content (the user/device tables) in the
+  // HTML source — a one-time query at this point in parsing would only
+  // ever see forms already in the DOM so far (just the logout form),
+  // silently missing every data-confirm form that comes later in the
+  // page. Delegation only needs the submit *target* to match at the
+  // moment it fires, so it works regardless of DOM order or timing.
+  document.addEventListener('submit', function (e) {
+    var form = e.target;
+    if (!(form instanceof HTMLFormElement) || !form.dataset.confirm) return;
+    e.preventDefault();
+    pendingForm = form;
+    var isDanger = form.dataset.confirmTone === 'danger';
+    titleEl.textContent = form.dataset.confirmTitle || 'Confirmar acción';
+    messageEl.textContent = form.dataset.confirm;
+    headerEl.className = 'modal-header' + (isDanger ? ' tone-danger' : '');
+    confirmBtn.className = 'btn ' + (isDanger ? 'btn-danger-solid' : 'btn-primary');
+    dialog.showModal();
+  });
+
+  // form.submit() (unlike a real click or .requestSubmit()) does not
+  // re-fire the 'submit' event, so this can't loop back into the
+  // listener above.
+  confirmBtn.addEventListener('click', function () {
+    dialog.close();
+    if (pendingForm) { pendingForm.submit(); pendingForm = null; }
+  });
+  cancelBtn.addEventListener('click', function () { dialog.close(); pendingForm = null; });
+
+  // Click en el backdrop cierra el modal, igual que ModalOverlay
+  // (onClick={onClose} sobre el fondo) en el cliente real: en un
+  // <dialog>, un click fuera del contenido pero dentro del elemento
+  // (el backdrop) llega con e.target === dialog.
+  dialog.addEventListener('click', function (e) {
+    if (e.target === dialog) { dialog.close(); pendingForm = null; }
+  });
+})();
+</script>
+{{end}}
+
+{{/* theme-toggle-button takes a string: "" for the inline topbar
+     placement, "theme-toggle-floating" for pages with no topbar
+     (login/setup) that need it fixed to the corner instead. Renders
+     both icons; CSS in partials.html's <style> decides which one is
+     visible for the currently active theme. */}}
+{{define "theme-toggle-button"}}
+<button type="button" class="btn btn-ghost icon-btn{{if .}} {{.}}{{end}}" id="theme-toggle-btn" aria-label="Cambiar tema claro/oscuro" title="Cambiar tema">{{template "icon-sun"}}{{template "icon-moon"}}</button>
+{{end}}
+
+{{define "theme-toggle-script"}}
+<script>
+(function () {
+  var root = document.documentElement;
+  var btn = document.getElementById('theme-toggle-btn');
+  if (!btn) return;
+
+  btn.addEventListener('click', function () {
+    var explicit = root.getAttribute('data-theme');
+    var currentlyDark = explicit ? explicit === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var next = currentlyDark ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    localStorage.setItem('logday_admin_theme', next);
+  });
+})();
+</script>
 {{end}}

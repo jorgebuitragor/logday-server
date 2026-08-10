@@ -95,7 +95,7 @@ func scanUser(row *sql.Row) (*user, error) {
 	return &u, nil
 }
 
-func (s *store) createDevice(ctx context.Context, userID, deviceName, refreshTokenHash string, expiresAt time.Time) (*device, error) {
+func (s *store) createDevice(ctx context.Context, userID, deviceName, refreshTokenHash string, expiresAt time.Time, ip, userAgent string) (*device, error) {
 	now := time.Now().UTC()
 	d := &device{
 		ID:                    uuid.NewString(),
@@ -105,12 +105,14 @@ func (s *store) createDevice(ctx context.Context, userID, deviceName, refreshTok
 		RefreshTokenExpiresAt: expiresAt,
 		CreatedAt:             now,
 		LastUsedAt:            now,
+		LastIP:                ip,
+		UserAgent:             userAgent,
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO devices (id, user_id, device_name, refresh_token_hash, refresh_token_expires_at, created_at, last_used_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO devices (id, user_id, device_name, refresh_token_hash, refresh_token_expires_at, created_at, last_used_at, last_ip, user_agent)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		d.ID, d.UserID, d.DeviceName, d.RefreshTokenHash,
-		formatTime(d.RefreshTokenExpiresAt), formatTime(d.CreatedAt), formatTime(d.LastUsedAt),
+		formatTime(d.RefreshTokenExpiresAt), formatTime(d.CreatedAt), formatTime(d.LastUsedAt), d.LastIP, d.UserAgent,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("inserting device: %w", err)
@@ -155,7 +157,7 @@ func fillDeviceTimes(d *device, expiresAt, createdAt, lastUsedAt string) (*devic
 // old hash as used so a later replay attempt can be detected as token
 // theft (see wasRefreshTokenUsed) instead of failing like any other
 // invalid token.
-func (s *store) rotateRefreshToken(ctx context.Context, deviceID, oldHash, newHash string, newExpiresAt time.Time) error {
+func (s *store) rotateRefreshToken(ctx context.Context, deviceID, oldHash, newHash string, newExpiresAt time.Time, ip, userAgent string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
@@ -172,8 +174,8 @@ func (s *store) rotateRefreshToken(ctx context.Context, deviceID, oldHash, newHa
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE devices SET refresh_token_hash = ?, refresh_token_expires_at = ?, last_used_at = ? WHERE id = ?`,
-		newHash, formatTime(newExpiresAt), formatTime(now), deviceID,
+		`UPDATE devices SET refresh_token_hash = ?, refresh_token_expires_at = ?, last_used_at = ?, last_ip = ?, user_agent = ? WHERE id = ?`,
+		newHash, formatTime(newExpiresAt), formatTime(now), ip, userAgent, deviceID,
 	); err != nil {
 		return fmt.Errorf("updating device: %w", err)
 	}
@@ -453,7 +455,7 @@ func (s *store) updateUserPassword(ctx context.Context, id, passwordHash string)
 func (s *store) listAllDevices(ctx context.Context) ([]deviceWithOwner, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT d.id, d.user_id, d.device_name, d.refresh_token_hash, d.refresh_token_expires_at,
-		       d.created_at, d.last_used_at, u.email
+		       d.created_at, d.last_used_at, d.last_ip, d.user_agent, u.email
 		FROM devices d
 		JOIN users u ON u.id = d.user_id
 		ORDER BY d.last_used_at DESC
@@ -468,7 +470,7 @@ func (s *store) listAllDevices(ctx context.Context) ([]deviceWithOwner, error) {
 		var dw deviceWithOwner
 		var expiresAt, createdAt, lastUsedAt string
 		if err := rows.Scan(&dw.ID, &dw.UserID, &dw.DeviceName, &dw.RefreshTokenHash, &expiresAt,
-			&createdAt, &lastUsedAt, &dw.OwnerEmail); err != nil {
+			&createdAt, &lastUsedAt, &dw.LastIP, &dw.UserAgent, &dw.OwnerEmail); err != nil {
 			return nil, fmt.Errorf("scanning device: %w", err)
 		}
 		if _, err := fillDeviceTimes(&dw.device, expiresAt, createdAt, lastUsedAt); err != nil {

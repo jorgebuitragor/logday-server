@@ -5,16 +5,26 @@
 {{template "head" .}}
 </head>
 <body>
+{{template "theme-toggle-button" "theme-toggle-floating"}}
 <div class="card">
+  <div class="brand">
+    <img class="brand-logo" src="/admin/static/logo.png" alt="Logday">
+    <span class="brand-name">{{if .InstanceName}}{{.InstanceName}}{{else}}Logday Server{{end}}</span>
+  </div>
   <h1>Iniciar sesión</h1>
-  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+  {{if .Error}}<p class="error">{{template "icon-triangle-alert"}} {{.Error}}</p>{{end}}
   <form method="post" action="/admin/panel/login">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-    <p><label>Email<br><input type="email" name="email" required value="{{.Email}}"></label></p>
-    <p><label>Contraseña<br><input type="password" name="password" required></label></p>
-    <button type="submit">Entrar</button>
+    <label>Email
+      <input type="email" name="email" required value="{{.Email}}">
+    </label>
+    <label>Contraseña
+      <input type="password" name="password" required>
+    </label>
+    <button type="submit" class="btn btn-primary">Entrar</button>
   </form>
 </div>
+{{template "theme-toggle-script"}}
 </body>
 </html>
 {{end}}

@@ -63,3 +63,83 @@ Estado: implementado
 - [x] `README.md`: reescritura completa (deploy, env vars, `/setup`,
       reverse proxy).
 - [x] `specs/README.md`: fila nueva en el índice de features.
+
+## Ronda 2: look & feel de Logday, confirmaciones, configuración
+
+- [x] Decidir alcance de theming: dark por defecto + light automático por
+      `prefers-color-scheme`, sin selector de tema completo (v1) — luego
+      se sumó un toggle manual igual (ver más abajo), decisión revisada
+      a pedido explícito.
+- [x] Decidir uso del logo real: sí, copiar `task-manager/src/assets/logo.png`
+      a `internal/auth/static/`, embebido y servido como favicon + logo.
+- [x] Decidir documentación de reverse proxy: solo prosa en README, sin
+      archivo de ejemplo — ya cubierto arriba, confirmado de nuevo.
+- [x] Portar paleta/tipografía/radios reales de Logday (`task-manager/src/App.css`)
+      a `templates/partials.html` — dark+light con los mismos valores hex,
+      sin inventar colores.
+- [x] Agregar toggle manual de tema (íconos sol/luna, `data-theme` +
+      `localStorage`, sin flash del tema incorrecto).
+- [x] Corregir contraste de bordes de inputs (`--border` → `--border-high`)
+      — el valor calcado de Logday tenía muy poco contraste contra el
+      fondo casi negro del panel, reportado como bug visual.
+- [x] Agregar íconos reales (Lucide, no genéricos) en toda la superficie
+      interactiva: `templates/icons.html`, 18 íconos.
+- [x] Convertir "Crear usuario" de formulario inline a `<dialog>` modal.
+- [x] Corregir espaciado del botón "Crear usuario" pegado al header de
+      la tabla (`.page-header` en vez de estilos inline sin margen).
+- [x] Agregar diálogo de confirmación compartido (`data-confirm` en
+      forms) para: cerrar sesión, dar de baja usuario, resetear
+      password, revocar device, promover/degradar admin.
+- [x] Decidir alcance del apartado de "Configuración" — preguntado
+      explícitamente al usuario, eligió las 4 opciones propuestas:
+      nombre de instancia, estado/generador de `JWT_SECRET`, retención
+      de tombstones, rate limit de login.
+- [x] Decidir alcance de "rotación" de `JWT_SECRET`: generador de
+      sugerencia (no persiste, no aplica en caliente) en vez de
+      rotación real — ver justificación en `design.md`.
+- [x] Paquete `internal/settings` nuevo: `Settings`, `Get`, `Update`,
+      `TombstoneRetention()`, `LoginRateLimitWindow()`.
+- [x] Migración `00015_create_instance_settings.sql`.
+- [x] Conectar `internal/db/purge.go` y `internal/auth/ratelimit.go` a
+      settings en vivo (sin restart) en vez de constantes fijas.
+- [x] `templates/settings.html` + handlers `panelSettings`,
+      `panelUpdateSettings`, `panelGenerateSecret` + validación de rangos.
+- [x] Instance name dinámico en `<title>`/`.brand-name` en las 5 páginas
+      del panel (`Handler.instanceName`, con fallback si falla la lectura).
+- [x] Tests: `internal/settings/settings_test.go` (paquete de test
+      externo `settings_test`, para evitar el ciclo de import con
+      `internal/db`, que ahora importa `internal/settings`),
+      `TestPanelSettingsPage` en `panel_handlers_test.go`.
+- [x] `go build`/`go test`/`golangci-lint run` en verde (0 issues) tras
+      cada cambio.
+- [x] Validación manual contra un contenedor Docker real: login,
+      diálogos de confirmación, página de configuración completa
+      (guardar valores válidos/inválidos, generar secreto sugerido,
+      nombre de instancia reflejado en el header).
+- [x] Actualizar `specs/panel-admin/{requirements,design}.md` con la
+      sección de Configuración y la de confirmaciones/look&feel.
+
+## Ronda 3: estilo real del modal de confirmación, IP e ícono de dispositivo
+
+- [x] Leer los componentes reales `ConfirmDeleteModal.tsx`/`ModalPanel.tsx`/
+      `ModalOverlay.tsx` de `task-manager` y calcar su tamaño, tipografía,
+      colores de botón (`bg-red-500`/`hover:bg-red-600`) y backdrop
+      (`bg-black/60 backdrop-blur-sm` = blur 4px, no 2px) en `#confirm-modal`
+      — antes era una aproximación genérica, no el componente real.
+- [x] Quitar el botón de cierre en X del header del confirm-modal (el
+      componente real no lo tiene); agregar cierre al hacer click en el
+      backdrop, igual que `ModalOverlay`.
+- [x] Migración `00016_add_device_ip_and_agent.sql`: `last_ip`/`user_agent`
+      en `devices`.
+- [x] `createDevice`/`rotateRefreshToken` escriben `clientIP(r)`/
+      `r.UserAgent()` (creación y en cada refresh, igual criterio que
+      `last_used_at`).
+- [x] `listAllDevices` selecciona las columnas nuevas; `device.IconName()`
+      clasifica por heurística de substring sobre el User-Agent
+      (tablet/smartphone/terminal/laptop-default).
+- [x] Íconos Lucide nuevos: `smartphone`, `tablet`, `terminal`.
+- [x] `devices.html`: columna IP + ícono de tipo junto al nombre del
+      dispositivo (`.device-cell`).
+- [x] `go build`/`go test`/`golangci-lint run` en verde (0 issues);
+      validación manual contra Docker real.
+- [x] Actualizar `specs/panel-admin/{requirements,design,tasks}.md`.
