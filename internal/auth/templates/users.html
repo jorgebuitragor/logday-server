@@ -60,7 +60,9 @@
     <td>{{.Email}}</td>
     <td>{{.DeletedAt.Format "2006-01-02"}}</td>
     <td>
-      <form class="inline" method="post" action="/admin/panel/users/{{.ID}}/restore">
+      <form class="inline" method="post" action="/admin/panel/users/{{.ID}}/restore"
+            data-confirm="{{.Email}} va a poder volver a iniciar sesión."
+            data-confirm-title="Restaurar usuario">
         <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
         <button type="submit" class="btn btn-ghost">{{template "icon-rotate-ccw"}} Restaurar</button>
       </form>

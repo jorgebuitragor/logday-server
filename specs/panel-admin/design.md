@@ -197,11 +197,13 @@ CSRF quedan intactos, el diálogo es puramente un gate de UI delante.
 vuelve a disparar el evento `submit`, así que no hay loop.
 
 Acciones marcadas como críticas: cerrar sesión, dar de baja usuario,
-resetear password, revocar device, promover/degradar admin. Deliberadamente
-sin confirmación: restaurar usuario (reversible/bajo riesgo), crear usuario
-(ya pasa por su propio modal de datos), guardar configuración (ajuste
-operativo, no destructivo), generar sugerencia de `JWT_SECRET` (no persiste
-ni aplica nada).
+resetear password, revocar device, promover/degradar admin, restaurar
+usuario (a pedido explícito del usuario — aunque es reversible, sigue
+siendo una acción con efecto real: la cuenta vuelve a poder loguearse).
+Deliberadamente sin confirmación: crear usuario (ya pasa por su propio
+modal de datos), guardar configuración (ajuste operativo, no
+destructivo), generar sugerencia de `JWT_SECRET` (no persiste ni aplica
+nada).
 
 El estilo de `#confirm-modal` está calcado del componente real
 `ConfirmDeleteModal.tsx` de `task-manager` (no de una aproximación genérica
