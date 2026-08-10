@@ -224,6 +224,13 @@ cliente real; el modal más grande de "Crear usuario" (formulario, no un
 `ConfirmDeleteModal`) sigue con el tratamiento genérico de `.modal-body`/
 `.modal-header` de más arriba.
 
+`showModal()` no bloquea por sí solo el scroll de la página de fondo (solo
+pone el `<dialog>` en el top layer e `inert` al resto, pero el `body`
+sigue siendo scrolleable detrás) — `html:has(dialog.modal[open]) {
+overflow: hidden; }` en `partials.html` lo bloquea mientras cualquier
+modal esté abierto, vía CSS puro (`:has()`), sin JS adicional ni acoplar
+esto a la lógica de apertura/cierre de cada dialog.
+
 Prefijo `/admin/panel/*` para la superficie HTML, separado del JSON
 `POST /admin/users` existente — no es requisito técnico de `chi` (solo
 `chi.Mount` colisiona en paths compartidos, y acá se registra todo directo

@@ -175,6 +175,7 @@
     border: none; border-radius: 8px; padding: 0.5rem 1rem;
     font: inherit; font-size: 0.8rem; font-weight: 500; cursor: pointer;
     transition: background-color .15s ease, color .15s ease;
+    -webkit-user-select: none; user-select: none;
   }
   .btn-primary { background: var(--accent-strong); color: #fff; }
   .btn-primary:hover { background: var(--accent); }
@@ -229,6 +230,12 @@
   .card h1 { text-align: center; margin-bottom: 0.4rem; }
   .card p.hint { text-align: center; margin: 0 0 1.5rem; }
   .card .btn-primary { width: 100%; padding: 0.6rem; margin-top: 0.5rem; }
+
+  /* showModal() no bloquea el scroll del fondo por sí solo — solo pone
+     el <dialog> en el "top layer" e inert al resto, pero el body sigue
+     siendo scrolleable detrás. :has() aplica esto automáticamente
+     mientras cualquier dialog.modal esté abierto, sin JS. */
+  html:has(dialog.modal[open]) { overflow: hidden; }
 
   dialog.modal {
     width: 100%; max-width: 420px; margin: auto; padding: 0;
