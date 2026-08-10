@@ -13,7 +13,7 @@
       {{template "icon-user-plus"}} Crear usuario
     </button>
   </div>
-  {{if .Error}}<p class="error">{{template "icon-triangle-alert"}} {{.Error}}</p>{{end}}
+  {{if and .Error (ne .ErrorModal "create-user-modal")}}<p class="error">{{template "icon-triangle-alert"}} {{.Error}}</p>{{end}}
 
   <table>
   <tr><th>Email</th><th>Rol</th><th>Creado</th><th>Acciones</th></tr>
@@ -70,7 +70,7 @@
   </table>
 </div>
 
-<dialog id="create-user-modal" class="modal">
+<dialog id="create-user-modal" class="modal"{{if eq .ErrorModal "create-user-modal"}} data-reopen="1"{{end}}>
   <form method="post" action="/admin/panel/users" class="modal-body">
     <div class="modal-header">
       <h2>Crear usuario</h2>
@@ -79,8 +79,9 @@
       </button>
     </div>
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    {{if eq .ErrorModal "create-user-modal"}}<p class="error">{{template "icon-triangle-alert"}} {{.Error}}</p>{{end}}
     <label>Email
-      <input type="email" name="email" required>
+      <input type="email" name="email" value="{{.FormEmail}}" required>
     </label>
     <label>Contraseña
       <input type="password" name="password" required minlength="{{.MinPasswordLength}}">
@@ -92,6 +93,12 @@
     </div>
   </form>
 </dialog>
+<script>
+(function () {
+  var modal = document.getElementById('create-user-modal');
+  if (modal && modal.dataset.reopen) modal.showModal();
+})();
+</script>
 
 {{/* Un único dialog compartido por página (mismo patrón que confirm-modal
      en partials.html): cada fila lo abre con openResetPasswordModal,

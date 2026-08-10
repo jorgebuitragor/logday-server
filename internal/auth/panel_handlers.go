@@ -73,6 +73,8 @@ type formPageData struct {
 type usersPageData struct {
 	CSRFToken         string
 	Error             string
+	ErrorModal        string
+	FormEmail         string
 	Success           string
 	Users             []user
 	Active            string
@@ -101,6 +103,17 @@ type settingsPageData struct {
 
 func (h *Handler) redirectWithError(w http.ResponseWriter, r *http.Request, path, msg string) {
 	http.Redirect(w, r, path+"?error="+url.QueryEscape(msg), http.StatusFound)
+}
+
+// redirectWithModalError is like redirectWithError, but for a form that
+// lives inside a <dialog> (e.g. create-user-modal) instead of the plain
+// page body — modal, echoed back as ?modal=<id>, tells the next GET which
+// dialog to reopen and render the error inside, instead of the page-level
+// .error banner used for actions with no modal of their own. email is
+// echoed back too so the operator doesn't have to retype it (password is
+// deliberately not echoed).
+func (h *Handler) redirectWithModalError(w http.ResponseWriter, r *http.Request, path, modal, email, msg string) {
+	http.Redirect(w, r, path+"?error="+url.QueryEscape(msg)+"&modal="+url.QueryEscape(modal)+"&email="+url.QueryEscape(email), http.StatusFound)
 }
 
 // redirectWithSuccess drives the toast shown after a state-changing panel
@@ -301,6 +314,7 @@ func (h *Handler) panelUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	renderTemplate(w, h.tmpl, http.StatusOK, "users.html", usersPageData{
 		CSRFToken: csrf, Users: users, Error: r.URL.Query().Get("error"), Success: r.URL.Query().Get("success"),
+		ErrorModal: r.URL.Query().Get("modal"), FormEmail: r.URL.Query().Get("email"),
 		Active: "users", InstanceName: h.instanceName(r.Context()), MinPasswordLength: cfg.MinPasswordLength,
 	})
 }
@@ -327,14 +341,14 @@ func (h *Handler) panelCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case email == "" || len(password) < cfg.MinPasswordLength:
-		h.redirectWithError(w, r, "/admin/panel",
+		h.redirectWithModalError(w, r, "/admin/panel", "create-user-modal", email,
 			fmt.Sprintf("email y contraseña (mínimo %d caracteres) son obligatorios", cfg.MinPasswordLength))
 		return
 	case !validEmail(email):
-		h.redirectWithError(w, r, "/admin/panel", "ese email no es válido")
+		h.redirectWithModalError(w, r, "/admin/panel", "create-user-modal", email, "ese email no es válido")
 		return
 	case !cfg.EmailDomainAllowed(email):
-		h.redirectWithError(w, r, "/admin/panel", "el dominio de ese email no está permitido en esta instancia")
+		h.redirectWithModalError(w, r, "/admin/panel", "create-user-modal", email, "el dominio de ese email no está permitido en esta instancia")
 		return
 	}
 
@@ -345,7 +359,7 @@ func (h *Handler) panelCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := h.store.createUser(r.Context(), email, hash, isAdmin); err != nil {
 		if errors.Is(err, errDuplicateEmail) {
-			h.redirectWithError(w, r, "/admin/panel", "ya existe un usuario con ese email")
+			h.redirectWithModalError(w, r, "/admin/panel", "create-user-modal", email, "ya existe un usuario con ese email")
 			return
 		}
 		http.Error(w, "internal error", http.StatusInternalServerError)
