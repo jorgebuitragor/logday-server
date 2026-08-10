@@ -57,6 +57,48 @@ func TestGetReturnsMigrationSeededDefaults(t *testing.T) {
 	if s.LoginRateLimitWindow() != 60*time.Second {
 		t.Fatalf("unexpected LoginRateLimitWindow(): %v", s.LoginRateLimitWindow())
 	}
+	if s.AllowedEmailDomains != "" {
+		t.Fatalf("expected no default domain restriction, got %q", s.AllowedEmailDomains)
+	}
+	if s.MinPasswordLength != 8 {
+		t.Fatalf("expected default min password length of 8, got %d", s.MinPasswordLength)
+	}
+	if s.AccessTokenTTLMinutes != 15 || s.AccessTokenTTL() != 15*time.Minute {
+		t.Fatalf("expected default access token TTL of 15m, got %d (%v)", s.AccessTokenTTLMinutes, s.AccessTokenTTL())
+	}
+	if s.RefreshTokenTTLDays != 30 || s.RefreshTokenTTL() != 30*24*time.Hour {
+		t.Fatalf("expected default refresh token TTL of 30d, got %d (%v)", s.RefreshTokenTTLDays, s.RefreshTokenTTL())
+	}
+	if s.PanelSessionTTLHours != 24 || s.PanelSessionTTL() != 24*time.Hour {
+		t.Fatalf("expected default panel session TTL of 24h, got %d (%v)", s.PanelSessionTTLHours, s.PanelSessionTTL())
+	}
+	if s.MaxDevicesPerUser != 0 {
+		t.Fatalf("expected default max devices per user of 0 (unlimited), got %d", s.MaxDevicesPerUser)
+	}
+}
+
+func TestEmailDomainAllowed(t *testing.T) {
+	cases := []struct {
+		name    string
+		allowed string
+		email   string
+		want    bool
+	}{
+		{"empty allowlist permits anything", "", "someone@example.com", true},
+		{"exact match", "example.com", "someone@example.com", true},
+		{"case-insensitive domain and list", "Example.COM", "someone@EXAMPLE.com", true},
+		{"one of several, whitespace tolerated", " other.com , example.com ", "someone@example.com", true},
+		{"domain not listed", "example.com", "someone@other.com", false},
+		{"no @ in email", "example.com", "not-an-email", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := settings.Settings{AllowedEmailDomains: tc.allowed}
+			if got := s.EmailDomainAllowed(tc.email); got != tc.want {
+				t.Fatalf("EmailDomainAllowed(%q) with allowlist %q = %v, want %v", tc.email, tc.allowed, got, tc.want)
+			}
+		})
+	}
 }
 
 func TestUpdateRoundTrips(t *testing.T) {
@@ -73,6 +115,12 @@ func TestUpdateRoundTrips(t *testing.T) {
 		TombstoneRetentionDays:      30,
 		LoginRateLimitAttempts:      10,
 		LoginRateLimitWindowSeconds: 120,
+		AllowedEmailDomains:         "example.com,other.org",
+		MinPasswordLength:           10,
+		AccessTokenTTLMinutes:       5,
+		RefreshTokenTTLDays:         7,
+		PanelSessionTTLHours:        2,
+		MaxDevicesPerUser:           3,
 	}
 	if err := settings.Update(ctx, database, want); err != nil {
 		t.Fatalf("Update: %v", err)
@@ -85,7 +133,13 @@ func TestUpdateRoundTrips(t *testing.T) {
 	if got.InstanceName != want.InstanceName ||
 		got.TombstoneRetentionDays != want.TombstoneRetentionDays ||
 		got.LoginRateLimitAttempts != want.LoginRateLimitAttempts ||
-		got.LoginRateLimitWindowSeconds != want.LoginRateLimitWindowSeconds {
+		got.LoginRateLimitWindowSeconds != want.LoginRateLimitWindowSeconds ||
+		got.AllowedEmailDomains != want.AllowedEmailDomains ||
+		got.MinPasswordLength != want.MinPasswordLength ||
+		got.AccessTokenTTLMinutes != want.AccessTokenTTLMinutes ||
+		got.RefreshTokenTTLDays != want.RefreshTokenTTLDays ||
+		got.PanelSessionTTLHours != want.PanelSessionTTLHours ||
+		got.MaxDevicesPerUser != want.MaxDevicesPerUser {
 		t.Fatalf("Update did not persist: got %+v, want %+v", got, want)
 	}
 	if !got.UpdatedAt.After(before.UpdatedAt) {

@@ -304,12 +304,62 @@ la raíz de confianza de JWT de variable de entorno a base de datos —
 decisión de arquitectura aparte, no tomada acá (ver "Fuera de este spec"
 en `requirements.md`).
 
+## Ronda 4: dominios de email, contraseña mínima, TTLs de sesión, máximo de dispositivos
+
+Cuatro campos más en `instance_settings` (migración `00017`), mismo
+patrón que los cuatro originales — validación de rangos vive en
+`panelUpdateSettings`, `settings.Update` solo persiste.
+
+- **`AllowedEmailDomains`** (CSV, `""` = cualquier dominio) +
+  `Settings.EmailDomainAllowed(email)`. Se aplica en `adminCreateUser`
+  (JSON `POST /admin/users`) y `panelCreateUser` — **no** en
+  `setupSubmit`: el primer admin de la instancia no debe poder
+  auto-bloquearse, y conceptualmente no hay quién haya configurado la
+  restricción todavía en ese momento. Es deliberadamente un *guardrail
+  operativo*, no un control de acceso: las tres vías de creación de
+  usuario ya requieren ser admin (o ser el arranque inicial) — no existe
+  registro público que este filtro pudiera estar gateando. Su valor real
+  es evitar que un admin cargue por error el dominio equivocado al
+  invitar gente.
+- **`MinPasswordLength`** (default `8`, antes hardcodeado en 3 lugares
+  de `panel_handlers.go` y ausente por completo en `adminCreateUser` —
+  ese endpoint JSON no validaba ningún largo, solo que no estuviera
+  vacía; queda corregido de paso).
+- **`AccessTokenTTLMinutes`/`RefreshTokenTTLDays`/`PanelSessionTTLHours`**
+  (defaults `15`/`30`/`24`, idénticos a las constantes que reemplazan:
+  `tokens.go`'s `accessTokenTTL`/`refreshTokenTTL` y
+  `panel_session.go`'s `panelSessionTTL`, ambas eliminadas). `login` y
+  `refresh` (`handlers.go`) hacen `settings.Get` y pasan
+  `cfg.AccessTokenTTL()`/`cfg.RefreshTokenTTL()` a
+  `issueAccessToken`/`createDevice`/`rotateRefreshToken`;
+  `setupSubmit`/`panelLoginSubmit` (`panel_handlers.go`) hacen lo mismo
+  con `cfg.PanelSessionTTL()` para `issuePanelSession`/`setSessionCookie`.
+  Un cambio de TTL aplica al próximo login/refresh, no invalida sesiones
+  ya emitidas (el `exp` queda fijo en el JWT desde que se firmó).
+  **`ensureCSRFCookie` no cambió de firma** — su `MaxAge` usaba
+  `panelSessionTTL` prestada, ahora usa una constante propia y fija
+  (`csrfCookieTTL = 24h`, mismo valor numérico): un token CSRF solo
+  necesita sobrevivir de "renderizar un form" a "enviarlo", no la vida de
+  toda la sesión, así que no valía la pena encadenar `settings.Get` a
+  cada handler GET que solo renderiza un form.
+- **`MaxDevicesPerUser`** (default `0` = sin límite) + nuevo
+  `store.countDevices(ctx, userID)`. `login` rechaza con `403` antes de
+  crear el device si `cfg.MaxDevicesPerUser > 0` y ya se alcanzó el
+  límite — mensaje pide revocar un device primero, sin evicción
+  automática (silenciosamente cerrar la sesión de otro dispositivo sería
+  un efecto sorpresa). `refresh` no chequea esto — reutiliza un device
+  existente, no agrega uno nuevo.
+
 ## Migración
 
 - `00014_add_deleted_at_to_users.sql` — `ALTER TABLE users ADD COLUMN
   deleted_at TEXT` (mismo estilo que `00012_add_purged_before_seq.sql`).
 - `00015_create_instance_settings.sql` — crea `instance_settings` con
   una fila sembrada (`id = 1`, valores default) en la misma migración.
+- `00017_add_config_flexibility.sql` — 6 columnas más en
+  `instance_settings`, defaults idénticos al valor hoy hardcodeado (ver
+  "Ronda 4" arriba) — una instancia existente no cambia de comportamiento
+  hasta que un admin toque algo.
 
 ## Explícitamente pendiente
 

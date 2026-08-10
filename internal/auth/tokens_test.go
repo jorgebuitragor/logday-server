@@ -1,6 +1,9 @@
 package auth
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // Round-trip of the auth-specific claims (UserID/DeviceID/IsAdmin).
 // Generic JWT signing/parsing/expiry behavior is covered in
@@ -8,7 +11,7 @@ import "testing"
 func TestAccessTokenRoundTrip(t *testing.T) {
 	secret := []byte("test-secret")
 
-	token, err := issueAccessToken(secret, "user-1", "device-1", true)
+	token, err := issueAccessToken(secret, "user-1", "device-1", true, 15*time.Minute)
 	if err != nil {
 		t.Fatalf("issueAccessToken: %v", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -70,11 +71,12 @@ type formPageData struct {
 }
 
 type usersPageData struct {
-	CSRFToken    string
-	Error        string
-	Users        []user
-	Active       string
-	InstanceName string
+	CSRFToken         string
+	Error             string
+	Users             []user
+	Active            string
+	InstanceName      string
+	MinPasswordLength int
 }
 
 type devicesPageData struct {
@@ -147,12 +149,18 @@ func (h *Handler) setupSubmit(w http.ResponseWriter, r *http.Request) {
 			formPageData{CSRFToken: csrf, Error: msg, Email: email, InstanceName: h.instanceName(r.Context())})
 	}
 
+	cfg, err := settings.Get(r.Context(), h.store.db)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
 	switch {
 	case email == "" || password == "":
 		renderSetupError("email y contraseña son obligatorios")
 		return
-	case len(password) < 8:
-		renderSetupError("la contraseña debe tener al menos 8 caracteres")
+	case len(password) < cfg.MinPasswordLength:
+		renderSetupError(fmt.Sprintf("la contraseña debe tener al menos %d caracteres", cfg.MinPasswordLength))
 		return
 	case password != confirm:
 		renderSetupError("las contraseñas no coinciden")
@@ -178,12 +186,12 @@ func (h *Handler) setupSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := issuePanelSession(h.jwtSecret, u.ID, true)
+	token, err := issuePanelSession(h.jwtSecret, u.ID, true, cfg.PanelSessionTTL())
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	setSessionCookie(w, r, token)
+	setSessionCookie(w, r, token, cfg.PanelSessionTTL())
 	http.Redirect(w, r, "/admin/panel", http.StatusFound)
 }
 
@@ -243,12 +251,18 @@ func (h *Handler) panelLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	h.limiter.Reset(limitKey)
 
-	token, err := issuePanelSession(h.jwtSecret, u.ID, u.IsAdmin)
+	cfg, err := settings.Get(r.Context(), h.store.db)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	setSessionCookie(w, r, token)
+
+	token, err := issuePanelSession(h.jwtSecret, u.ID, u.IsAdmin, cfg.PanelSessionTTL())
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	setSessionCookie(w, r, token, cfg.PanelSessionTTL())
 	http.Redirect(w, r, "/admin/panel", http.StatusFound)
 }
 
@@ -268,8 +282,15 @@ func (h *Handler) panelUsers(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	renderTemplate(w, h.tmpl, http.StatusOK, "users.html",
-		usersPageData{CSRFToken: csrf, Users: users, Error: r.URL.Query().Get("error"), Active: "users", InstanceName: h.instanceName(r.Context())})
+	cfg, err := settings.Get(r.Context(), h.store.db)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	renderTemplate(w, h.tmpl, http.StatusOK, "users.html", usersPageData{
+		CSRFToken: csrf, Users: users, Error: r.URL.Query().Get("error"), Active: "users",
+		InstanceName: h.instanceName(r.Context()), MinPasswordLength: cfg.MinPasswordLength,
+	})
 }
 
 func (h *Handler) panelCreateUser(w http.ResponseWriter, r *http.Request) {
@@ -286,8 +307,19 @@ func (h *Handler) panelCreateUser(w http.ResponseWriter, r *http.Request) {
 	password := r.FormValue("password")
 	isAdmin := r.FormValue("is_admin") == "on"
 
-	if email == "" || len(password) < 8 {
-		h.redirectWithError(w, r, "/admin/panel", "email y contraseña (mínimo 8 caracteres) son obligatorios")
+	cfg, err := settings.Get(r.Context(), h.store.db)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	switch {
+	case email == "" || len(password) < cfg.MinPasswordLength:
+		h.redirectWithError(w, r, "/admin/panel",
+			fmt.Sprintf("email y contraseña (mínimo %d caracteres) son obligatorios", cfg.MinPasswordLength))
+		return
+	case !cfg.EmailDomainAllowed(email):
+		h.redirectWithError(w, r, "/admin/panel", "el dominio de ese email no está permitido en esta instancia")
 		return
 	}
 
@@ -395,8 +427,14 @@ func (h *Handler) panelResetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	id := chi.URLParam(r, "id")
 	password := r.FormValue("password")
-	if len(password) < 8 {
-		h.redirectWithError(w, r, "/admin/panel", "la contraseña debe tener al menos 8 caracteres")
+
+	cfg, err := settings.Get(r.Context(), h.store.db)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if len(password) < cfg.MinPasswordLength {
+		h.redirectWithError(w, r, "/admin/panel", fmt.Sprintf("la contraseña debe tener al menos %d caracteres", cfg.MinPasswordLength))
 		return
 	}
 
@@ -469,11 +507,10 @@ func (h *Handler) panelSettings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// panelUpdateSettings validates and saves the four operator-tunable
-// settings. Bounds are deliberately generous but not unlimited — wide
-// enough not to get in the way, tight enough to catch a fat-fingered
-// value (e.g. "0" attempts, which would lock every login out including
-// the admin's own).
+// panelUpdateSettings validates and saves the operator-tunable settings.
+// Bounds are deliberately generous but not unlimited — wide enough not to
+// get in the way, tight enough to catch a fat-fingered value (e.g. "0"
+// attempts, which would lock every login out including the admin's own).
 func (h *Handler) panelUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
@@ -488,6 +525,12 @@ func (h *Handler) panelUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	retentionDays, retentionErr := strconv.Atoi(r.FormValue("tombstone_retention_days"))
 	attempts, attemptsErr := strconv.Atoi(r.FormValue("login_rate_limit_attempts"))
 	windowSecs, windowErr := strconv.Atoi(r.FormValue("login_rate_limit_window_seconds"))
+	domains := normalizeEmailDomains(r.FormValue("allowed_email_domains"))
+	minPasswordLength, minPasswordErr := strconv.Atoi(r.FormValue("min_password_length"))
+	accessTTL, accessTTLErr := strconv.Atoi(r.FormValue("access_token_ttl_minutes"))
+	refreshTTL, refreshTTLErr := strconv.Atoi(r.FormValue("refresh_token_ttl_days"))
+	panelTTL, panelTTLErr := strconv.Atoi(r.FormValue("panel_session_ttl_hours"))
+	maxDevices, maxDevicesErr := strconv.Atoi(r.FormValue("max_devices_per_user"))
 
 	switch {
 	case name == "" || len(name) > 60:
@@ -502,6 +545,21 @@ func (h *Handler) panelUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	case windowErr != nil || windowSecs < 10 || windowSecs > 3600:
 		h.redirectWithError(w, r, "/admin/panel/settings", "la ventana del límite de login debe ser un número entre 10 y 3600 segundos")
 		return
+	case minPasswordErr != nil || minPasswordLength < 4 || minPasswordLength > 128:
+		h.redirectWithError(w, r, "/admin/panel/settings", "la longitud mínima de contraseña debe ser un número entre 4 y 128")
+		return
+	case accessTTLErr != nil || accessTTL < 1 || accessTTL > 1440:
+		h.redirectWithError(w, r, "/admin/panel/settings", "la duración del access token debe ser un número entre 1 y 1440 minutos")
+		return
+	case refreshTTLErr != nil || refreshTTL < 1 || refreshTTL > 365:
+		h.redirectWithError(w, r, "/admin/panel/settings", "la duración del refresh token debe ser un número entre 1 y 365 días")
+		return
+	case panelTTLErr != nil || panelTTL < 1 || panelTTL > 720:
+		h.redirectWithError(w, r, "/admin/panel/settings", "la duración de la sesión del panel debe ser un número entre 1 y 720 horas")
+		return
+	case maxDevicesErr != nil || maxDevices < 0 || maxDevices > 1000:
+		h.redirectWithError(w, r, "/admin/panel/settings", "el máximo de dispositivos por usuario debe ser un número entre 0 (sin límite) y 1000")
+		return
 	}
 
 	err := settings.Update(r.Context(), h.store.db, settings.Settings{
@@ -509,12 +567,34 @@ func (h *Handler) panelUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		TombstoneRetentionDays:      retentionDays,
 		LoginRateLimitAttempts:      attempts,
 		LoginRateLimitWindowSeconds: windowSecs,
+		AllowedEmailDomains:         domains,
+		MinPasswordLength:           minPasswordLength,
+		AccessTokenTTLMinutes:       accessTTL,
+		RefreshTokenTTLDays:         refreshTTL,
+		PanelSessionTTLHours:        panelTTL,
+		MaxDevicesPerUser:           maxDevices,
 	})
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	http.Redirect(w, r, "/admin/panel/settings", http.StatusFound)
+}
+
+// normalizeEmailDomains trims/lowercases each comma-separated entry and
+// drops empties, so "Foo.com, , bar.COM" round-trips as "foo.com,bar.com"
+// — Settings.EmailDomainAllowed already lowercases at comparison time,
+// this just keeps the stored/displayed value predictable.
+func normalizeEmailDomains(raw string) string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, ",")
 }
 
 // panelGenerateSecret suggests a new JWT_SECRET value for the operator

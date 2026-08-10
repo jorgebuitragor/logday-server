@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // Round-trip of the panel-specific session claims. Generic JWT signing/
@@ -13,7 +14,7 @@ import (
 func TestPanelSessionRoundTrip(t *testing.T) {
 	secret := []byte("test-secret")
 
-	token, err := issuePanelSession(secret, "user-1", true)
+	token, err := issuePanelSession(secret, "user-1", true, 24*time.Hour)
 	if err != nil {
 		t.Fatalf("issuePanelSession: %v", err)
 	}

@@ -3,6 +3,7 @@ package auth
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"net/http"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/jorgebuitragor/logday-server/internal/security"
+	"github.com/jorgebuitragor/logday-server/internal/settings"
 )
 
 // Handler exposes the auth HTTP endpoints and the middleware (RequireAuth,
@@ -87,6 +89,24 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	h.limiter.Reset(limitKey)
 
+	cfg, err := settings.Get(r.Context(), h.store.db)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	if cfg.MaxDevicesPerUser > 0 {
+		count, err := h.store.countDevices(r.Context(), u.ID)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if count >= cfg.MaxDevicesPerUser {
+			http.Error(w, "device limit reached, revoke a device first", http.StatusForbidden)
+			return
+		}
+	}
+
 	deviceName := req.DeviceName
 	if deviceName == "" {
 		deviceName = "unknown device"
@@ -98,13 +118,13 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	d, err := h.store.createDevice(r.Context(), u.ID, deviceName, refreshHash, time.Now().Add(refreshTokenTTL), clientIP(r), r.UserAgent())
+	d, err := h.store.createDevice(r.Context(), u.ID, deviceName, refreshHash, time.Now().Add(cfg.RefreshTokenTTL()), clientIP(r), r.UserAgent())
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	access, err := issueAccessToken(h.jwtSecret, u.ID, d.ID, u.IsAdmin)
+	access, err := issueAccessToken(h.jwtSecret, u.ID, d.ID, u.IsAdmin, cfg.AccessTokenTTL())
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -153,18 +173,24 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cfg, err := settings.Get(r.Context(), h.store.db)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
 	newRaw, newHash, err := security.GenerateOpaqueToken()
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	if err := h.store.rotateRefreshToken(r.Context(), d.ID, hash, newHash, time.Now().Add(refreshTokenTTL), clientIP(r), r.UserAgent()); err != nil {
+	if err := h.store.rotateRefreshToken(r.Context(), d.ID, hash, newHash, time.Now().Add(cfg.RefreshTokenTTL()), cfg.RefreshTokenTTL(), clientIP(r), r.UserAgent()); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	access, err := issueAccessToken(h.jwtSecret, u.ID, d.ID, u.IsAdmin)
+	access, err := issueAccessToken(h.jwtSecret, u.ID, d.ID, u.IsAdmin, cfg.AccessTokenTTL())
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -237,6 +263,20 @@ func (h *Handler) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Email == "" || req.Password == "" {
 		http.Error(w, "email and password are required", http.StatusBadRequest)
+		return
+	}
+
+	cfg, err := settings.Get(r.Context(), h.store.db)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if len(req.Password) < cfg.MinPasswordLength {
+		http.Error(w, fmt.Sprintf("password must be at least %d characters", cfg.MinPasswordLength), http.StatusBadRequest)
+		return
+	}
+	if !cfg.EmailDomainAllowed(req.Email) {
+		http.Error(w, "email domain not allowed", http.StatusBadRequest)
 		return
 	}
 

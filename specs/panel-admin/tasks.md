@@ -143,3 +143,44 @@ Estado: implementado
 - [x] `go build`/`go test`/`golangci-lint run` en verde (0 issues);
       validación manual contra Docker real.
 - [x] Actualizar `specs/panel-admin/{requirements,design,tasks}.md`.
+
+## Ronda 4: dominios de email, contraseña mínima, TTLs de sesión, máximo de dispositivos
+
+- [x] Preguntado explícitamente al usuario qué ajustes sumar además del
+      filtro de dominio (su idea original) — eligió los tres restantes:
+      longitud mínima de contraseña, TTLs de sesión, máximo de
+      dispositivos por usuario.
+- [x] Comunicado explícitamente que el filtro de dominio es un guardrail
+      operativo, no un control de acceso (no existe registro público en
+      ningún momento) — el usuario decidió incluirlo igual.
+- [x] Migración `00017_add_config_flexibility.sql`: 6 columnas nuevas en
+      `instance_settings`, defaults idénticos al valor hoy hardcodeado.
+- [x] `internal/settings`: 6 campos nuevos + `EmailDomainAllowed`,
+      `AccessTokenTTL`, `RefreshTokenTTL`, `PanelSessionTTL`.
+- [x] `tokens.go`/`panel_session.go`: se eliminan `accessTokenTTL`,
+      `refreshTokenTTL`, `panelSessionTTL`; `issueAccessToken`/
+      `issuePanelSession`/`setSessionCookie` reciben `ttl` como
+      parámetro; `ensureCSRFCookie` queda con un `csrfCookieTTL` fijo
+      propio en vez de la constante prestada.
+- [x] `store.go`: `rotateRefreshToken` +parámetro `refreshTTL`; nuevo
+      `countDevices`.
+- [x] `handlers.go`: `login` chequea `MaxDevicesPerUser` antes de crear
+      el device (403 si se alcanzó); `login`/`refresh` usan TTLs en
+      vivo; `adminCreateUser` (JSON) valida largo mínimo y dominio —
+      corrige que antes no validaba ningún largo.
+- [x] `panel_handlers.go`: `setupSubmit`/`panelLoginSubmit` usan
+      `cfg.PanelSessionTTL()`; `panelCreateUser`/`panelResetPassword`/
+      `setupSubmit` usan `cfg.MinPasswordLength`; `panelCreateUser`
+      valida dominio (setup queda exento a propósito);
+      `panelUpdateSettings` valida y persiste los 6 campos nuevos.
+- [x] `settings.html`: secciones "Cuentas" y "Sesiones" nuevas.
+- [x] Tests nuevos: `EmailDomainAllowed` (tabla de casos),
+      `TestPanelCreateUserRespectsEmailDomainAllowlist`,
+      `TestLoginRejectsBeyondMaxDevicesPerUser`, bounds de los 6 campos
+      nuevos en `TestPanelSettingsPage`; firmas actualizadas en
+      `tokens_test.go`/`panel_session_test.go`.
+- [x] `go build`/`go test`/`golangci-lint run` en verde (0 issues);
+      validación manual contra Docker real (dominio rechazado/aceptado,
+      TTL corto expirando, máximo de dispositivos rechazando el
+      N+1-ésimo login).
+- [x] Actualizar `specs/panel-admin/{requirements,design,tasks}.md`.

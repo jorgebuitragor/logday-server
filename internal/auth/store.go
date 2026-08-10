@@ -157,7 +157,7 @@ func fillDeviceTimes(d *device, expiresAt, createdAt, lastUsedAt string) (*devic
 // old hash as used so a later replay attempt can be detected as token
 // theft (see wasRefreshTokenUsed) instead of failing like any other
 // invalid token.
-func (s *store) rotateRefreshToken(ctx context.Context, deviceID, oldHash, newHash string, newExpiresAt time.Time, ip, userAgent string) error {
+func (s *store) rotateRefreshToken(ctx context.Context, deviceID, oldHash, newHash string, newExpiresAt time.Time, refreshTTL time.Duration, ip, userAgent string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
@@ -180,7 +180,7 @@ func (s *store) rotateRefreshToken(ctx context.Context, deviceID, oldHash, newHa
 		return fmt.Errorf("updating device: %w", err)
 	}
 
-	cutoff := formatTime(now.Add(-refreshTokenTTL - 24*time.Hour))
+	cutoff := formatTime(now.Add(-refreshTTL - 24*time.Hour))
 	if _, err := tx.ExecContext(ctx, `DELETE FROM used_refresh_tokens WHERE used_at < ?`, cutoff); err != nil {
 		return fmt.Errorf("pruning used refresh tokens: %w", err)
 	}
@@ -242,6 +242,16 @@ func (s *store) revokeDeviceForUser(ctx context.Context, id, userID string) erro
 		return errNotFound
 	}
 	return nil
+}
+
+// countDevices backs the configurable max-devices-per-user guard on
+// login (Settings.MaxDevicesPerUser).
+func (s *store) countDevices(ctx context.Context, userID string) (int, error) {
+	var count int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM devices WHERE user_id = ?`, userID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("counting devices: %w", err)
+	}
+	return count, nil
 }
 
 func (s *store) listDevices(ctx context.Context, userID string) ([]device, error) {

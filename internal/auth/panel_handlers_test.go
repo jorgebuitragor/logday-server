@@ -18,6 +18,7 @@ import (
 
 	"github.com/jorgebuitragor/logday-server/internal/db"
 	"github.com/jorgebuitragor/logday-server/internal/security"
+	"github.com/jorgebuitragor/logday-server/internal/settings"
 )
 
 func setupPanelServer(t *testing.T) (*httptest.Server, *Handler, *store) {
@@ -247,7 +248,7 @@ func TestPanelSessionRedirectsOnTamperedOrExpiredCookie(t *testing.T) {
 		UserID:  admin.ID,
 		IsAdmin: true,
 		RegisteredClaims: jwt.RegisteredClaims{
-			IssuedAt:  jwt.NewNumericDate(time.Now().Add(-2 * panelSessionTTL)),
+			IssuedAt:  jwt.NewNumericDate(time.Now().Add(-48 * time.Hour)),
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Hour)),
 		},
 	}
@@ -496,6 +497,104 @@ func TestPanelUserAndDeviceLifecycle(t *testing.T) {
 	}
 }
 
+func TestPanelCreateUserRespectsEmailDomainAllowlist(t *testing.T) {
+	srv, _, authStore := setupPanelServer(t)
+	mustCreatePanelAdmin(t, authStore, "admin@example.com", "correct-horse-battery")
+
+	if err := settings.Update(context.Background(), authStore.db, settings.Settings{
+		InstanceName: "Logday Server", TombstoneRetentionDays: 90,
+		LoginRateLimitAttempts: 5, LoginRateLimitWindowSeconds: 60,
+		AllowedEmailDomains: "example.com", MinPasswordLength: 8,
+		AccessTokenTTLMinutes: 15, RefreshTokenTTLDays: 30, PanelSessionTTLHours: 24,
+	}); err != nil {
+		t.Fatalf("settings.Update: %v", err)
+	}
+
+	client := newPanelClient(t)
+	loginToPanel(t, client, srv, "admin@example.com", "correct-horse-battery")
+	csrfFor := func(path string) string {
+		body, _ := getAndScrapeCSRF(t, client, srv, path)
+		return scrapeCSRF(t, body)
+	}
+
+	// Wrong domain: rejected, no user created.
+	resp := postForm(t, client, srv, "/admin/panel/users", url.Values{
+		"csrf_token": {csrfFor("/admin/panel")},
+		"email":      {"someone@other.com"},
+		"password":   {"member-pass-123"},
+	})
+	_ = resp.Body.Close()
+	if !strings.Contains(resp.Header.Get("Location"), "error=") {
+		t.Fatalf("expected a disallowed domain to be rejected with an error redirect, got Location=%q", resp.Header.Get("Location"))
+	}
+	if _, err := authStore.getUserByEmail(context.Background(), "someone@other.com"); err == nil {
+		t.Fatalf("expected no user to be created for a disallowed domain")
+	}
+
+	// Allowed domain: succeeds.
+	resp = postForm(t, client, srv, "/admin/panel/users", url.Values{
+		"csrf_token": {csrfFor("/admin/panel")},
+		"email":      {"someone@example.com"},
+		"password":   {"member-pass-123"},
+	})
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusFound || strings.Contains(resp.Header.Get("Location"), "error=") {
+		t.Fatalf("expected an allowed domain to succeed, got %d Location=%q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	if _, err := authStore.getUserByEmail(context.Background(), "someone@example.com"); err != nil {
+		t.Fatalf("expected the allowed-domain user to be created: %v", err)
+	}
+
+	// /setup (first-admin bootstrap) is deliberately exempt from the
+	// domain allowlist — but that's already locked out here since an
+	// admin exists, so this just confirms the lockout still holds with
+	// the allowlist configured (a stronger guarantee would need a fresh
+	// instance, covered by the existing setup-flow tests).
+	setupResp, err := http.Get(srv.URL + "/setup")
+	if err != nil {
+		t.Fatalf("GET /setup: %v", err)
+	}
+	_ = setupResp.Body.Close()
+	if req := setupResp.Request; req == nil || !strings.HasSuffix(req.URL.Path, "/admin/panel/login") {
+		t.Fatalf("expected /setup to redirect to login once an admin exists, got final URL %v", setupResp.Request)
+	}
+}
+
+func TestLoginRejectsBeyondMaxDevicesPerUser(t *testing.T) {
+	srv, _, authStore := setupPanelServer(t)
+	mustCreatePanelAdmin(t, authStore, "admin@example.com", "correct-horse-battery")
+
+	if err := settings.Update(context.Background(), authStore.db, settings.Settings{
+		InstanceName: "Logday Server", TombstoneRetentionDays: 90,
+		LoginRateLimitAttempts: 5, LoginRateLimitWindowSeconds: 60,
+		MinPasswordLength: 8, AccessTokenTTLMinutes: 15, RefreshTokenTTLDays: 30,
+		PanelSessionTTLHours: 24, MaxDevicesPerUser: 1,
+	}); err != nil {
+		t.Fatalf("settings.Update: %v", err)
+	}
+
+	login := func(deviceName string) *http.Response {
+		resp, err := http.Post(srv.URL+"/auth/login", "application/json",
+			strings.NewReader(`{"email":"admin@example.com","password":"correct-horse-battery","device_name":"`+deviceName+`"}`))
+		if err != nil {
+			t.Fatalf("JSON login: %v", err)
+		}
+		return resp
+	}
+
+	first := login("device-one")
+	_ = first.Body.Close()
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("expected the first login to succeed, got %d", first.StatusCode)
+	}
+
+	second := login("device-two")
+	_ = second.Body.Close()
+	if second.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected the second login to be rejected once MaxDevicesPerUser=1 is reached, got %d", second.StatusCode)
+	}
+}
+
 func TestPanelSettingsPage(t *testing.T) {
 	srv, _, authStore := setupPanelServer(t)
 	mustCreatePanelAdmin(t, authStore, "admin@example.com", "correct-horse-battery")
@@ -530,6 +629,12 @@ func TestPanelSettingsPage(t *testing.T) {
 		"tombstone_retention_days":        {"90"},
 		"login_rate_limit_attempts":       {"5"},
 		"login_rate_limit_window_seconds": {"60"},
+		"allowed_email_domains":           {""},
+		"min_password_length":             {"8"},
+		"access_token_ttl_minutes":        {"15"},
+		"refresh_token_ttl_days":          {"30"},
+		"panel_session_ttl_hours":         {"24"},
+		"max_devices_per_user":            {"0"},
 	})
 	_ = resp.Body.Close()
 	if !strings.Contains(resp.Header.Get("Location"), "error=") {
@@ -546,6 +651,12 @@ func TestPanelSettingsPage(t *testing.T) {
 		"tombstone_retention_days":        {"30"},
 		"login_rate_limit_attempts":       {"10"},
 		"login_rate_limit_window_seconds": {"120"},
+		"allowed_email_domains":           {" Example.com , Other.ORG ,"},
+		"min_password_length":             {"10"},
+		"access_token_ttl_minutes":        {"5"},
+		"refresh_token_ttl_days":          {"7"},
+		"panel_session_ttl_hours":         {"2"},
+		"max_devices_per_user":            {"3"},
 	})
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/admin/panel/settings" {
@@ -560,6 +671,32 @@ func TestPanelSettingsPage(t *testing.T) {
 	}
 	if !strings.Contains(body2, `value="30"`) {
 		t.Fatalf("expected the updated retention days in the form, got:\n%s", body2)
+	}
+	if !strings.Contains(body2, `value="example.com,other.org"`) {
+		t.Fatalf("expected allowed_email_domains normalized (trimmed/lowercased), got:\n%s", body2)
+	}
+	if !strings.Contains(body2, `value="10"`) {
+		t.Fatalf("expected the updated min_password_length in the form, got:\n%s", body2)
+	}
+
+	// Out-of-range values for any of the new fields are rejected without
+	// touching the stored settings, same as the four original fields.
+	respBad := postForm(t, client, srv, "/admin/panel/settings", url.Values{
+		"csrf_token":                      {csrfFor("/admin/panel/settings")},
+		"instance_name":                   {"Equipo de Producto"},
+		"tombstone_retention_days":        {"30"},
+		"login_rate_limit_attempts":       {"10"},
+		"login_rate_limit_window_seconds": {"120"},
+		"allowed_email_domains":           {""},
+		"min_password_length":             {"2"},
+		"access_token_ttl_minutes":        {"5"},
+		"refresh_token_ttl_days":          {"7"},
+		"panel_session_ttl_hours":         {"2"},
+		"max_devices_per_user":            {"3"},
+	})
+	_ = respBad.Body.Close()
+	if !strings.Contains(respBad.Header.Get("Location"), "error=") {
+		t.Fatalf("expected min_password_length=2 to be rejected with an error redirect, got Location=%q", respBad.Header.Get("Location"))
 	}
 
 	// Generate-secret redirects back with a suggested value, shown

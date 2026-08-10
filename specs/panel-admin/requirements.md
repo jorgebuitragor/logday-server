@@ -94,6 +94,21 @@ depender de quien sepa manejar la API cruda.
   para `JWT_SECRET` — sin persistirlo ni aplicarlo en caliente (ver
   "Fuera de este spec": la rotación en caliente sigue sin implementarse
   a propósito).
+- El sistema DEBERÁ permitir configurar, desde el panel, una lista de
+  dominios de email permitidos para crear usuarios (vacío = cualquier
+  dominio). Aplica a la creación de usuarios vía panel y vía API JSON;
+  NO aplica al setup inicial del primer admin.
+- El sistema DEBERÁ permitir configurar la longitud mínima de
+  contraseña, aplicada de forma consistente en las cuatro vías que hoy
+  crean o cambian una contraseña (setup, crear usuario por panel, crear
+  usuario por API JSON, reset de contraseña).
+- El sistema DEBERÁ permitir configurar la duración del access token,
+  del refresh token de dispositivo, y de la sesión del panel de admin —
+  reemplazando lo que hoy son constantes fijas en el código. Los cambios
+  aplican al próximo login/refresh, sin invalidar sesiones ya emitidas.
+- El sistema DEBERÁ permitir configurar un máximo de dispositivos
+  simultáneos por usuario (0 = sin límite); alcanzado el máximo, un
+  nuevo login se rechaza hasta que se revoque algún device existente.
 
 ## Fuera de este spec
 

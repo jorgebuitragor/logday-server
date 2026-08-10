@@ -8,11 +8,6 @@ import (
 	"github.com/jorgebuitragor/logday-server/internal/security"
 )
 
-const (
-	accessTokenTTL  = 15 * time.Minute
-	refreshTokenTTL = 30 * 24 * time.Hour
-)
-
 type claims struct {
 	UserID   string `json:"sub"`
 	DeviceID string `json:"device_id"`
@@ -20,7 +15,11 @@ type claims struct {
 	jwt.RegisteredClaims
 }
 
-func issueAccessToken(secret []byte, userID, deviceID string, isAdmin bool) (string, error) {
+// issueAccessToken signs an access token valid for ttl — callers fetch
+// ttl from internal/settings (Settings.AccessTokenTTL()) live on every
+// login/refresh instead of a fixed constant, so an operator can change it
+// without restarting the server.
+func issueAccessToken(secret []byte, userID, deviceID string, isAdmin bool, ttl time.Duration) (string, error) {
 	now := time.Now()
 	c := claims{
 		UserID:   userID,
@@ -28,7 +27,7 @@ func issueAccessToken(secret []byte, userID, deviceID string, isAdmin bool) (str
 		IsAdmin:  isAdmin,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(accessTokenTTL)),
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 		},
 	}
 	return security.SignJWT(secret, c)

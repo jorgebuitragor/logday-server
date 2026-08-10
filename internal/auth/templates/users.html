@@ -42,17 +42,10 @@
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <button type="submit" class="btn btn-danger">{{template "icon-user-x"}} Dar de baja</button>
         </form>
-        <details>
-          <summary>{{template "icon-key-round"}} Resetear password</summary>
-          <form method="post" action="/admin/panel/users/{{.ID}}/reset-password"
-                data-confirm="Se revocan todas las sesiones activas de {{.Email}} — va a tener que volver a iniciar sesión con la contraseña nueva."
-                data-confirm-title="Resetear contraseña"
-                data-confirm-tone="danger">
-            <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-            <input type="password" name="password" required minlength="8" placeholder="Nueva contraseña">
-            <button type="submit" class="btn btn-primary">Guardar</button>
-          </form>
-        </details>
+        <button type="button" class="btn btn-ghost"
+                onclick="openResetPasswordModal('{{.ID}}', '{{.Email}}')">
+          {{template "icon-key-round"}} Resetear password
+        </button>
       </div>
     </td>
   </tr>
@@ -90,7 +83,7 @@
       <input type="email" name="email" required>
     </label>
     <label>Contraseña
-      <input type="password" name="password" required minlength="8">
+      <input type="password" name="password" required minlength="{{.MinPasswordLength}}">
     </label>
     <label class="checkbox"><input type="checkbox" name="is_admin"> Admin</label>
     <div class="modal-actions">
@@ -99,6 +92,79 @@
     </div>
   </form>
 </dialog>
+
+{{/* Un único dialog compartido por página (mismo patrón que confirm-modal
+     en partials.html): cada fila lo abre con openResetPasswordModal,
+     que apunta el form al usuario correcto y muestra su email. Sin
+     data-confirm encima — abrir este modal ya es el paso deliberado
+     (mismo criterio que create-user-modal), la consecuencia se explica
+     en el propio texto del modal en vez de apilar una segunda
+     confirmación. */}}
+<dialog id="reset-password-modal" class="modal">
+  <form method="post" id="reset-password-form" class="modal-body">
+    <div class="modal-header">
+      <h2>Resetear contraseña</h2>
+      <button type="button" class="btn btn-ghost icon-btn" onclick="document.getElementById('reset-password-modal').close()" aria-label="Cerrar">
+        {{template "icon-x"}}
+      </button>
+    </div>
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <p class="hint" id="reset-password-target"></p>
+    <label>Nueva contraseña
+      <div class="secret-box">
+        <input type="password" name="password" id="reset-password-input" required minlength="{{.MinPasswordLength}}" placeholder="Nueva contraseña">
+        <button type="button" class="btn btn-ghost icon-btn" id="reset-password-generate-btn" aria-label="Generar contraseña" title="Generar contraseña">{{template "icon-refresh-cw"}}</button>
+        <button type="button" class="btn btn-ghost icon-btn" id="reset-password-copy-btn" aria-label="Copiar" title="Copiar" style="display:none">{{template "icon-copy"}}</button>
+      </div>
+    </label>
+    <p class="hint">Mínimo {{.MinPasswordLength}} caracteres. Se revocan todas las sesiones activas de este usuario.</p>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" onclick="document.getElementById('reset-password-modal').close()">Cancelar</button>
+      <button type="submit" class="btn btn-primary">{{template "icon-save"}} Guardar</button>
+    </div>
+  </form>
+</dialog>
+<script>
+(function () {
+  var modal = document.getElementById('reset-password-modal');
+  var form = document.getElementById('reset-password-form');
+  var target = document.getElementById('reset-password-target');
+  var input = document.getElementById('reset-password-input');
+  var generateBtn = document.getElementById('reset-password-generate-btn');
+  var copyBtn = document.getElementById('reset-password-copy-btn');
+  if (!modal || !form || !input) return;
+
+  window.openResetPasswordModal = function (userID, email) {
+    form.action = '/admin/panel/users/' + userID + '/reset-password';
+    target.textContent = 'Para ' + email + '.';
+    input.value = '';
+    input.type = 'password';
+    copyBtn.style.display = 'none';
+    modal.showModal();
+  };
+
+  // Alfabeto sin caracteres ambiguos (0/O, 1/l/I) para que la
+  // contraseña generada sea fácil de transcribir a mano si hace falta.
+  function generatePassword(length) {
+    var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%^&*-_=+';
+    var bytes = new Uint8Array(length);
+    crypto.getRandomValues(bytes);
+    var out = '';
+    for (var i = 0; i < length; i++) out += chars[bytes[i] % chars.length];
+    return out;
+  }
+
+  generateBtn.addEventListener('click', function () {
+    input.value = generatePassword(16);
+    input.type = 'text';
+    copyBtn.style.display = '';
+  });
+
+  copyBtn.addEventListener('click', function () {
+    navigator.clipboard.writeText(input.value);
+  });
+})();
+</script>
 </body>
 </html>
 {{end}}

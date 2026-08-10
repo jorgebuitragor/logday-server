@@ -90,6 +90,11 @@
   }
 
   * { box-sizing: border-box; }
+  /* Reserva el espacio del scrollbar siempre, aparezca o no, para que
+     cambiar entre páginas con distinta altura (p. ej. Configuración,
+     mucho más larga que Usuarios/Dispositivos) no corra el ancho de la
+     navbar cuando la barra de scroll aparece/desaparece. */
+  html { scrollbar-gutter: stable; }
   body {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;

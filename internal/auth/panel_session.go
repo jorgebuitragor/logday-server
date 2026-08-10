@@ -11,12 +11,13 @@ import (
 	"github.com/jorgebuitragor/logday-server/internal/security"
 )
 
-// panelSessionTTL is deliberately fixed and much shorter than
-// refreshTokenTTL: the admin panel is a human clicking around
-// occasionally from a browser, not an offline-capable sync client, so
-// there's no multi-week session to bridge and no rotation/reuse-theft
-// detection to build — see specs/panel-admin/design.md.
-const panelSessionTTL = 24 * time.Hour
+// csrfCookieTTL is fixed, unlike the panel session TTL (see
+// Settings.PanelSessionTTL) — it only needs to survive from "render a
+// form" to "submit it", not for the life of a whole session, so it isn't
+// worth threading a live settings.Get() into every GET handler that just
+// renders a form. Same numeric value (24h) the CSRF cookie always had,
+// even back when it borrowed the (now configurable) session TTL for it.
+const csrfCookieTTL = 24 * time.Hour
 
 const (
 	sessionCookieName = "logday_admin_session"
@@ -30,14 +31,21 @@ type sessionClaims struct {
 	jwt.RegisteredClaims
 }
 
-func issuePanelSession(secret []byte, userID string, isAdmin bool) (string, error) {
+// issuePanelSession signs a panel session valid for ttl — callers fetch
+// ttl from internal/settings (Settings.PanelSessionTTL()) live at
+// login/setup time instead of a fixed constant, so an operator can change
+// it without restarting the server. The admin panel is a human clicking
+// around occasionally from a browser, not an offline-capable sync client,
+// so there's no multi-week session to bridge and no rotation/reuse-theft
+// detection to build — see specs/panel-admin/design.md.
+func issuePanelSession(secret []byte, userID string, isAdmin bool, ttl time.Duration) (string, error) {
 	now := time.Now()
 	c := sessionClaims{
 		UserID:  userID,
 		IsAdmin: isAdmin,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(panelSessionTTL)),
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 		},
 	}
 	return security.SignJWT(secret, c)
@@ -51,7 +59,7 @@ func parsePanelSession(secret []byte, tokenString string) (*sessionClaims, error
 	return c, nil
 }
 
-func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
+func setSessionCookie(w http.ResponseWriter, r *http.Request, token string, ttl time.Duration) {
 	//nolint:gosec // G124: Secure intentionally tracks r.TLS != nil, not a hardcoded true — self-hosted instances may run plain HTTP directly behind a LAN, see specs/panel-admin/design.md
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
@@ -60,7 +68,7 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 		HttpOnly: true,
 		Secure:   r.TLS != nil,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(panelSessionTTL.Seconds()),
+		MaxAge:   int(ttl.Seconds()),
 	})
 }
 
@@ -100,7 +108,7 @@ func ensureCSRFCookie(w http.ResponseWriter, r *http.Request) (string, error) {
 		HttpOnly: true,
 		Secure:   r.TLS != nil,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(panelSessionTTL.Seconds()),
+		MaxAge:   int(csrfCookieTTL.Seconds()),
 	})
 	return raw, nil
 }

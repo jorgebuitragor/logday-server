@@ -40,6 +40,45 @@
       <p class="hint">Aplica tanto al login del panel como al de la API de sync. Cambia en caliente, sin reiniciar.</p>
     </div>
 
+    <h3>Cuentas</h3>
+    <div class="field-group">
+      <label>Dominios de email permitidos para crear usuarios
+        <input type="text" name="allowed_email_domains" value="{{.Settings.AllowedEmailDomains}}" placeholder="jorgebuitrago.com,otraempresa.com">
+      </label>
+      <p class="hint">
+        Separados por coma. Vacío permite cualquier dominio. Aplica al crear usuarios
+        desde este panel y desde la API (<code>POST /admin/users</code>) — no a
+        <code>/setup</code>, que crea el primer admin de la instancia. Como toda
+        creación de usuario ya requiere ser admin, esto es un resguardo operativo
+        (evitar cargar el dominio equivocado por error), no un control de acceso.
+      </p>
+      <label>Longitud mínima de contraseña
+        <input type="text" inputmode="numeric" pattern="[0-9]*" name="min_password_length" required value="{{.Settings.MinPasswordLength}}">
+      </label>
+      <p class="hint">Entre 4 y 128 caracteres. Aplica a crear usuario, setup inicial y reset de contraseña.</p>
+    </div>
+
+    <h3>Sesiones</h3>
+    <div class="field-group">
+      <label>Duración del access token (minutos)
+        <input type="text" inputmode="numeric" pattern="[0-9]*" name="access_token_ttl_minutes" required value="{{.Settings.AccessTokenTTLMinutes}}">
+      </label>
+      <label>Duración del refresh token / dispositivo (días)
+        <input type="text" inputmode="numeric" pattern="[0-9]*" name="refresh_token_ttl_days" required value="{{.Settings.RefreshTokenTTLDays}}">
+      </label>
+      <label>Duración de la sesión del panel de admin (horas)
+        <input type="text" inputmode="numeric" pattern="[0-9]*" name="panel_session_ttl_hours" required value="{{.Settings.PanelSessionTTLHours}}">
+      </label>
+      <label>Máximo de dispositivos por usuario
+        <input type="text" inputmode="numeric" pattern="[0-9]*" name="max_devices_per_user" required value="{{.Settings.MaxDevicesPerUser}}">
+      </label>
+      <p class="hint">
+        Los cambios aplican a partir del próximo login/refresh — no invalidan
+        sesiones ya emitidas antes de guardar. <code>0</code> en el máximo de
+        dispositivos significa sin límite.
+      </p>
+    </div>
+
     <button type="submit" class="btn btn-primary">{{template "icon-save"}} Guardar cambios</button>
   </form>
 
