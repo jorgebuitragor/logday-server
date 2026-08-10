@@ -42,3 +42,4 @@ tres archivos:
 | Auth multi-usuario | implementado (v1) | [`auth-multiusuario/`](./auth-multiusuario/requirements.md) |
 | Esquema de datos | implementado | [`esquema-datos/`](./esquema-datos/requirements.md) |
 | Convenciones de código | en diseño | [`convenciones-codigo/`](./convenciones-codigo/requirements.md) |
+| Panel de administración web | implementado | [`panel-admin/`](./panel-admin/requirements.md) |

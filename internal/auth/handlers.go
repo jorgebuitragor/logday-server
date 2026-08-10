@@ -3,6 +3,7 @@ package auth
 import (
 	"encoding/json"
 	"errors"
+	"html/template"
 	"net/http"
 	"strings"
 	"time"
@@ -19,12 +20,13 @@ type Handler struct {
 	store     *store
 	jwtSecret []byte
 	limiter   *loginLimiter
+	tmpl      *template.Template
 }
 
 // NewHandler builds a Handler backed by s, signing/verifying access
 // tokens with jwtSecret.
 func NewHandler(s *store, jwtSecret []byte) *Handler {
-	return &Handler{store: s, jwtSecret: jwtSecret, limiter: newLoginLimiter()}
+	return &Handler{store: s, jwtSecret: jwtSecret, limiter: newLoginLimiter(), tmpl: parseTemplates()}
 }
 
 // Routes registers the auth-related endpoints on r.

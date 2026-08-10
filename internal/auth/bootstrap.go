@@ -12,6 +12,11 @@ import (
 // Bootstrap creates the first admin user from the ADMIN_EMAIL/
 // ADMIN_PASSWORD environment variables if the instance has no users
 // yet. It is a no-op on every later boot once at least one user exists.
+//
+// If those env vars aren't set and the instance has no users, this is
+// NOT an error: the server still boots, and GET /setup (see
+// specs/panel-admin/) serves a one-time form to create the first admin
+// from a browser instead.
 func Bootstrap(ctx context.Context, s *store) error {
 	count, err := s.countUsers(ctx)
 	if err != nil {
@@ -24,7 +29,8 @@ func Bootstrap(ctx context.Context, s *store) error {
 	email := os.Getenv("ADMIN_EMAIL")
 	password := os.Getenv("ADMIN_PASSWORD")
 	if email == "" || password == "" {
-		return fmt.Errorf("no users exist yet: set ADMIN_EMAIL and ADMIN_PASSWORD to bootstrap the first admin")
+		log.Print("no admin user yet — visit /setup to create one, or set ADMIN_EMAIL/ADMIN_PASSWORD and restart")
+		return nil
 	}
 
 	hash, err := security.HashPassword(password)

@@ -96,6 +96,7 @@ func main() {
 	})
 
 	authHandler.Routes(r)
+	authHandler.PanelRoutes(r)
 	taskHandler.Routes(r)
 	noteHandler.Routes(r)
 	overtimeHandler.Routes(r)

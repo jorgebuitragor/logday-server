@@ -14,6 +14,8 @@ import (
 var (
 	errNotFound       = errors.New("not found")
 	errDuplicateEmail = errors.New("email already exists")
+	errLastAdmin      = errors.New("cannot remove the last active admin")
+	errAlreadyInit    = errors.New("instance already has an admin")
 )
 
 type store struct {
@@ -28,7 +30,7 @@ func NewStore(db *sql.DB) *store {
 
 func (s *store) countUsers(ctx context.Context) (int, error) {
 	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE deleted_at IS NULL`).Scan(&count); err != nil {
 		return 0, fmt.Errorf("counting users: %w", err)
 	}
 	return count, nil
@@ -57,20 +59,22 @@ func (s *store) createUser(ctx context.Context, email, passwordHash string, isAd
 
 func (s *store) getUserByEmail(ctx context.Context, email string) (*user, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, email, password_hash, is_admin, created_at FROM users WHERE email = ?`, email)
+		`SELECT id, email, password_hash, is_admin, created_at, deleted_at
+		 FROM users WHERE email = ? AND deleted_at IS NULL`, email)
 	return scanUser(row)
 }
 
 func (s *store) getUserByID(ctx context.Context, id string) (*user, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, email, password_hash, is_admin, created_at FROM users WHERE id = ?`, id)
+		`SELECT id, email, password_hash, is_admin, created_at, deleted_at FROM users WHERE id = ?`, id)
 	return scanUser(row)
 }
 
 func scanUser(row *sql.Row) (*user, error) {
 	var u user
 	var createdAt string
-	if err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.IsAdmin, &createdAt); err != nil {
+	var deletedAt sql.NullString
+	if err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.IsAdmin, &createdAt, &deletedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errNotFound
 		}
@@ -81,6 +85,13 @@ func scanUser(row *sql.Row) (*user, error) {
 		return nil, err
 	}
 	u.CreatedAt = t
+	if deletedAt.Valid {
+		d, err := parseTime(deletedAt.String)
+		if err != nil {
+			return nil, err
+		}
+		u.DeletedAt = &d
+	}
 	return &u, nil
 }
 
@@ -256,6 +267,261 @@ func (s *store) listDevices(ctx context.Context, userID string) ([]device, error
 		return nil, fmt.Errorf("iterating devices: %w", err)
 	}
 	return devices, nil
+}
+
+// listUsers returns every user in the instance, active and soft-deleted
+// — the admin panel is the only caller that needs to see both, so it
+// doesn't scope by deleted_at like the rest of the store does.
+func (s *store) listUsers(ctx context.Context) ([]user, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, email, password_hash, is_admin, created_at, deleted_at FROM users ORDER BY created_at`)
+	if err != nil {
+		return nil, fmt.Errorf("querying users: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var users []user
+	for rows.Next() {
+		var u user
+		var createdAt string
+		var deletedAt sql.NullString
+		if err := rows.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.IsAdmin, &createdAt, &deletedAt); err != nil {
+			return nil, fmt.Errorf("scanning user: %w", err)
+		}
+		t, err := parseTime(createdAt)
+		if err != nil {
+			return nil, err
+		}
+		u.CreatedAt = t
+		if deletedAt.Valid {
+			d, err := parseTime(deletedAt.String)
+			if err != nil {
+				return nil, err
+			}
+			u.DeletedAt = &d
+		}
+		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating users: %w", err)
+	}
+	return users, nil
+}
+
+// updateUserAdmin promotes or demotes id. Demoting the sole active admin
+// is rejected (errLastAdmin) rather than locking the instance out of its
+// own panel — withLastAdminGuard's check is a no-op for promotions
+// (the target isn't currently an admin, so the guard never triggers).
+func (s *store) updateUserAdmin(ctx context.Context, id string, isAdmin bool) error {
+	return s.withLastAdminGuard(ctx, id, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE users SET is_admin = ? WHERE id = ?`, isAdmin, id)
+		if err != nil {
+			return fmt.Errorf("updating user admin flag: %w", err)
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("checking rows affected: %w", err)
+		}
+		if affected == 0 {
+			return errNotFound
+		}
+		return nil
+	})
+}
+
+// softDeleteUser deactivates id and immediately revokes all of its
+// devices — deleted_at alone wouldn't stop an already-issued refresh
+// token from working, since the ON DELETE CASCADE on devices only fires
+// on an actual DELETE of the user row, not this UPDATE.
+func (s *store) softDeleteUser(ctx context.Context, id string) error {
+	return s.withLastAdminGuard(ctx, id, func(tx *sql.Tx) error {
+		now := formatTime(time.Now().UTC())
+		res, err := tx.ExecContext(ctx,
+			`UPDATE users SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL`, now, id)
+		if err != nil {
+			return fmt.Errorf("soft-deleting user: %w", err)
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("checking rows affected: %w", err)
+		}
+		if affected == 0 {
+			return errNotFound
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM devices WHERE user_id = ?`, id); err != nil {
+			return fmt.Errorf("revoking devices: %w", err)
+		}
+		return nil
+	})
+}
+
+// withLastAdminGuard runs fn inside a transaction after confirming id
+// isn't the instance's sole remaining active admin (a no-op check when
+// id isn't currently an admin at all — safe to use unconditionally for
+// both updateUserAdmin's promote and demote paths, and for
+// softDeleteUser). updateUserPassword doesn't need this guard: a
+// password reset never changes admin status.
+func (s *store) withLastAdminGuard(ctx context.Context, id string, fn func(tx *sql.Tx) error) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var isAdmin bool
+	err = tx.QueryRowContext(ctx, `SELECT is_admin FROM users WHERE id = ? AND deleted_at IS NULL`, id).Scan(&isAdmin)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errNotFound
+		}
+		return fmt.Errorf("checking user: %w", err)
+	}
+	if isAdmin {
+		var admins int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM users WHERE deleted_at IS NULL AND is_admin = 1`,
+		).Scan(&admins); err != nil {
+			return fmt.Errorf("counting admins: %w", err)
+		}
+		if admins <= 1 {
+			return errLastAdmin
+		}
+	}
+
+	if err := fn(tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing: %w", err)
+	}
+	return nil
+}
+
+// restoreUser reactivates a soft-deleted user. Without this, soft-delete
+// would have no practical advantage over a hard delete.
+func (s *store) restoreUser(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL`, id)
+	if err != nil {
+		return fmt.Errorf("restoring user: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
+	if affected == 0 {
+		return errNotFound
+	}
+	return nil
+}
+
+// updateUserPassword resets id's password hash (admin-assisted, not
+// self-service — see specs/panel-admin/). Also revokes all of the
+// user's devices: a password reset is exactly the kind of event where
+// forcing re-login everywhere is the correct default.
+func (s *store) updateUserPassword(ctx context.Context, id, passwordHash string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx,
+		`UPDATE users SET password_hash = ? WHERE id = ? AND deleted_at IS NULL`, passwordHash, id)
+	if err != nil {
+		return fmt.Errorf("updating password: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
+	if affected == 0 {
+		return errNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM devices WHERE user_id = ?`, id); err != nil {
+		return fmt.Errorf("revoking devices: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing password reset: %w", err)
+	}
+	return nil
+}
+
+// listAllDevices returns every device in the instance, joined with its
+// owning user's email — unlike listDevices, deliberately not scoped to
+// one user, for the admin panel's cross-user device view.
+func (s *store) listAllDevices(ctx context.Context) ([]deviceWithOwner, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT d.id, d.user_id, d.device_name, d.refresh_token_hash, d.refresh_token_expires_at,
+		       d.created_at, d.last_used_at, u.email
+		FROM devices d
+		JOIN users u ON u.id = d.user_id
+		ORDER BY d.last_used_at DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("querying devices: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []deviceWithOwner
+	for rows.Next() {
+		var dw deviceWithOwner
+		var expiresAt, createdAt, lastUsedAt string
+		if err := rows.Scan(&dw.ID, &dw.UserID, &dw.DeviceName, &dw.RefreshTokenHash, &expiresAt,
+			&createdAt, &lastUsedAt, &dw.OwnerEmail); err != nil {
+			return nil, fmt.Errorf("scanning device: %w", err)
+		}
+		if _, err := fillDeviceTimes(&dw.device, expiresAt, createdAt, lastUsedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, dw)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating devices: %w", err)
+	}
+	return out, nil
+}
+
+// createFirstAdmin atomically checks that the instance has no active
+// users yet and creates email/hash as its first admin, all inside one
+// transaction — a plain "check then insert" would be a TOCTOU race
+// between two concurrent /setup submissions.
+func (s *store) createFirstAdmin(ctx context.Context, email, passwordHash string) (*user, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE deleted_at IS NULL`).Scan(&count); err != nil {
+		return nil, fmt.Errorf("counting users: %w", err)
+	}
+	if count > 0 {
+		return nil, errAlreadyInit
+	}
+
+	u := &user{
+		ID:           uuid.NewString(),
+		Email:        email,
+		PasswordHash: passwordHash,
+		IsAdmin:      true,
+		CreatedAt:    time.Now().UTC(),
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO users (id, email, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?, ?)`,
+		u.ID, u.Email, u.PasswordHash, u.IsAdmin, formatTime(u.CreatedAt),
+	); err != nil {
+		if isUniqueConstraintErr(err) {
+			return nil, errDuplicateEmail
+		}
+		return nil, fmt.Errorf("inserting first admin: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("committing first admin creation: %w", err)
+	}
+	return u, nil
 }
 
 func formatTime(t time.Time) string {

@@ -1,0 +1,30 @@
+{{define "head"}}
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Logday Server — Admin</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; line-height: 1.5; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid #ddd; }
+  form.inline { display: inline; }
+  input[type=email], input[type=password], input[type=text] { padding: 0.4rem 0.6rem; font: inherit; width: 100%; max-width: 320px; box-sizing: border-box; }
+  button { font: inherit; padding: 0.4rem 0.8rem; cursor: pointer; }
+  .error { color: #b00020; background: #fdecea; padding: 0.6rem; border-radius: 4px; }
+  .card { max-width: 380px; margin: 3rem auto; }
+  nav { margin-bottom: 1.5rem; border-bottom: 1px solid #ddd; padding-bottom: 1rem; }
+  nav a { margin-right: 1rem; }
+  .deleted { opacity: 0.6; }
+  details { display: inline-block; }
+</style>
+{{end}}
+
+{{define "nav"}}
+<nav>
+  <a href="/admin/panel">Usuarios</a>
+  <a href="/admin/panel/devices">Dispositivos</a>
+  <form class="inline" method="post" action="/admin/panel/logout">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <button type="submit">Cerrar sesión</button>
+  </form>
+</nav>
+{{end}}

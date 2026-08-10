@@ -8,6 +8,7 @@ type user struct {
 	PasswordHash string
 	IsAdmin      bool
 	CreatedAt    time.Time
+	DeletedAt    *time.Time
 }
 
 type device struct {
@@ -18,4 +19,12 @@ type device struct {
 	RefreshTokenExpiresAt time.Time
 	CreatedAt             time.Time
 	LastUsedAt            time.Time
+}
+
+// deviceWithOwner is a device joined with its owning user's email, for
+// the admin panel's cross-user device list (listAllDevices) — device
+// alone only has UserID, not something displayable.
+type deviceWithOwner struct {
+	device
+	OwnerEmail string
 }

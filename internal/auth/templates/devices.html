@@ -1,0 +1,29 @@
+{{define "devices.html"}}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+{{template "head" .}}
+</head>
+<body>
+{{template "nav" .}}
+<h2>Dispositivos</h2>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<table>
+<tr><th>Usuario</th><th>Dispositivo</th><th>Último uso</th><th>Acciones</th></tr>
+{{range .Devices}}
+<tr>
+  <td>{{.OwnerEmail}}</td>
+  <td>{{.DeviceName}}</td>
+  <td>{{.LastUsedAt.Format "2006-01-02 15:04"}}</td>
+  <td>
+    <form class="inline" method="post" action="/admin/panel/devices/{{.ID}}/revoke">
+      <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+      <button type="submit">Revocar</button>
+    </form>
+  </td>
+</tr>
+{{end}}
+</table>
+</body>
+</html>
+{{end}}

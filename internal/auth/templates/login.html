@@ -1,0 +1,20 @@
+{{define "login.html"}}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+{{template "head" .}}
+</head>
+<body>
+<div class="card">
+  <h1>Iniciar sesión</h1>
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+  <form method="post" action="/admin/panel/login">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <p><label>Email<br><input type="email" name="email" required value="{{.Email}}"></label></p>
+    <p><label>Contraseña<br><input type="password" name="password" required></label></p>
+    <button type="submit">Entrar</button>
+  </form>
+</div>
+</body>
+</html>
+{{end}}

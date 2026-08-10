@@ -45,10 +45,12 @@ migración de esquema.
 - Setup inicial: al arrancar, si la tabla `users` está vacía, el
   servidor lee `ADMIN_EMAIL`/`ADMIN_PASSWORD` del entorno y crea ese
   usuario como admin (`internal/auth/bootstrap.go`). Si no están
-  seteadas y no hay usuarios, el servidor falla al arrancar con un
-  mensaje explícito — no arranca en un estado sin ningún admin
-  posible. En arranques posteriores (ya con usuarios) es un no-op,
-  aunque las variables sigan presentes en el entorno.
+  seteadas y no hay usuarios, el servidor arranca de todos modos y
+  sirve `GET /setup` — un admin se crea desde ahí en su lugar (ver
+  [`panel-admin/`](../panel-admin/design.md)). Antes de que existiera
+  el panel, este caso hacía fallar el arranque del servidor
+  (`log.Fatal`) — ya no. En arranques posteriores (ya con usuarios) es
+  un no-op, aunque las variables sigan presentes en el entorno.
 - Un admin crea usuarios adicionales vía `POST /admin/users`
   (requiere `Authorization: Bearer <access_token>` de un usuario con
   `is_admin=true`).

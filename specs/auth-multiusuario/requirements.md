@@ -54,8 +54,10 @@ y cómo se gestionan sus sesiones por dispositivo.
 
 ## Fuera de este spec
 
-- Recuperación de password (depende de si la instancia tiene SMTP
-  configurado — no decidido).
+- Recuperación de password **self-service** (depende de si la instancia
+  tiene SMTP configurado — no decidido). El reset de password
+  **admin-asistido** (un admin resetea la de otro usuario) se agregó en
+  [`panel-admin/`](../panel-admin/requirements.md).
 - Autenticación de dos factores.
 - Roles/permisos granulares más allá de admin vs. usuario normal.
 - UI concreta de "dispositivos conectados" en cada cliente — decisión

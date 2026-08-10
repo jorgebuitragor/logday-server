@@ -1,0 +1,22 @@
+{{define "setup.html"}}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+{{template "head" .}}
+</head>
+<body>
+<div class="card">
+  <h1>Configurar Logday Server</h1>
+  <p>Todavía no hay ningún administrador. Creá la primera cuenta para empezar.</p>
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+  <form method="post" action="/setup">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <p><label>Email<br><input type="email" name="email" required value="{{.Email}}"></label></p>
+    <p><label>Contraseña<br><input type="password" name="password" required minlength="8"></label></p>
+    <p><label>Confirmar contraseña<br><input type="password" name="password_confirm" required minlength="8"></label></p>
+    <button type="submit">Crear administrador</button>
+  </form>
+</div>
+</body>
+</html>
+{{end}}

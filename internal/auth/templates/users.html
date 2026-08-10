@@ -1,0 +1,68 @@
+{{define "users.html"}}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+{{template "head" .}}
+</head>
+<body>
+{{template "nav" .}}
+<h2>Usuarios</h2>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+
+<table>
+<tr><th>Email</th><th>Rol</th><th>Creado</th><th>Acciones</th></tr>
+{{range .Users}}{{if not .DeletedAt}}
+<tr>
+  <td>{{.Email}}</td>
+  <td>{{if .IsAdmin}}admin{{else}}usuario{{end}}</td>
+  <td>{{.CreatedAt.Format "2006-01-02"}}</td>
+  <td>
+    <form class="inline" method="post" action="/admin/panel/users/{{.ID}}/{{if .IsAdmin}}demote{{else}}promote{{end}}">
+      <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+      <button type="submit">{{if .IsAdmin}}Quitar admin{{else}}Hacer admin{{end}}</button>
+    </form>
+    <form class="inline" method="post" action="/admin/panel/users/{{.ID}}/delete">
+      <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+      <button type="submit">Dar de baja</button>
+    </form>
+    <details>
+      <summary>Resetear password</summary>
+      <form method="post" action="/admin/panel/users/{{.ID}}/reset-password">
+        <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+        <input type="password" name="password" required minlength="8" placeholder="Nueva contraseña">
+        <button type="submit">Guardar</button>
+      </form>
+    </details>
+  </td>
+</tr>
+{{end}}{{end}}
+</table>
+
+<h3>Usuarios dados de baja</h3>
+<table>
+<tr><th>Email</th><th>Baja</th><th>Acciones</th></tr>
+{{range .Users}}{{if .DeletedAt}}
+<tr class="deleted">
+  <td>{{.Email}}</td>
+  <td>{{.DeletedAt.Format "2006-01-02"}}</td>
+  <td>
+    <form class="inline" method="post" action="/admin/panel/users/{{.ID}}/restore">
+      <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+      <button type="submit">Restaurar</button>
+    </form>
+  </td>
+</tr>
+{{end}}{{end}}
+</table>
+
+<h3>Crear usuario</h3>
+<form method="post" action="/admin/panel/users">
+  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+  <p><label>Email<br><input type="email" name="email" required></label></p>
+  <p><label>Contraseña<br><input type="password" name="password" required minlength="8"></label></p>
+  <p><label><input type="checkbox" name="is_admin"> Admin</label></p>
+  <button type="submit">Crear</button>
+</form>
+</body>
+</html>
+{{end}}
