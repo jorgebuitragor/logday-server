@@ -265,6 +265,10 @@ func (h *Handler) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "email and password are required", http.StatusBadRequest)
 		return
 	}
+	if !validEmail(req.Email) {
+		http.Error(w, "invalid email address", http.StatusBadRequest)
+		return
+	}
 
 	cfg, err := settings.Get(r.Context(), h.store.db)
 	if err != nil {

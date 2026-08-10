@@ -184,3 +184,36 @@ Estado: implementado
       TTL corto expirando, máximo de dispositivos rechazando el
       N+1-ésimo login).
 - [x] Actualizar `specs/panel-admin/{requirements,design,tasks}.md`.
+
+## Ronda 5: validación de email, "Resetear password" en modal, toasts
+
+- [x] `helpers.go`: `validEmail` vía `net/mail.ParseAddress` (sin
+      dependencia nueva) — check de formato, no de deliverabilidad.
+      Conectado en `adminCreateUser` (JSON), `panelCreateUser`,
+      `setupSubmit`.
+- [x] "Resetear password" pasa de `<details>` inline por fila a un
+      `<dialog>` único compartido en `users.html` (mismo patrón que
+      `create-user-modal`), abierto por fila vía
+      `openResetPasswordModal(id, email)`; incluye generador de
+      contraseña aleatoria (Web Crypto, alfabeto sin caracteres
+      ambiguos) + botón de copiar.
+- [x] `usersPageData`/`create-user-modal`/`reset-password-modal` usan
+      `MinPasswordLength` en vivo (ya no `minlength="8"` hardcodeado).
+- [x] Toast de confirmación (`{{define "toast"}}` en `partials.html`,
+      patrón post/redirect/get: el handler redirige con
+      `?success=mensaje`, el GET siguiente lo renderiza una vez y el
+      toast se auto-oculta a los 3.5s). Nuevo token `--success` y
+      `redirectWithSuccess`, usado en: crear/promover/degradar/dar de
+      baja/restaurar usuario, resetear contraseña, revocar device,
+      guardar configuración. Login/logout/setup quedan sin toast (el
+      redirect mismo ya es la confirmación visible).
+- [x] Tests: `helpers_test.go` (`validEmail`, tabla de casos),
+      `TestAdminCreateUserRejectsMalformedEmail`, caso de email
+      malformado + verificación del toast renderizado en
+      `TestPanelUserAndDeviceLifecycle`, `TestPanelSettingsPage`
+      actualizado al nuevo `Location` con `?success=`.
+- [x] `go build`/`go test`/`golangci-lint run` en verde (0 issues);
+      validación manual contra Docker real (email inválido rechazado,
+      modal de reset con generador, toast visible tras reset de
+      contraseña).
+- [x] Actualizar `specs/panel-admin/{requirements,tasks}.md`.

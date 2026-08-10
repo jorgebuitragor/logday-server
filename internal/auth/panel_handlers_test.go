@@ -328,6 +328,20 @@ func TestPanelUserAndDeviceLifecycle(t *testing.T) {
 		return scrapeCSRF(t, body)
 	}
 
+	// A malformed email is rejected before it ever reaches the store.
+	badEmailResp := postForm(t, client, srv, "/admin/panel/users", url.Values{
+		"csrf_token": {csrfFor("/admin/panel")},
+		"email":      {"not-an-email"},
+		"password":   {"member-pass-123"},
+	})
+	_ = badEmailResp.Body.Close()
+	if !strings.Contains(badEmailResp.Header.Get("Location"), "error=") {
+		t.Fatalf("expected a malformed email to be rejected with an error redirect, got Location=%q", badEmailResp.Header.Get("Location"))
+	}
+	if _, err := authStore.getUserByEmail(context.Background(), "not-an-email"); err == nil {
+		t.Fatalf("expected no user to be created for a malformed email")
+	}
+
 	// Create a second (non-admin) user from the panel.
 	resp := postForm(t, client, srv, "/admin/panel/users", url.Values{
 		"csrf_token": {csrfFor("/admin/panel")},
@@ -337,6 +351,23 @@ func TestPanelUserAndDeviceLifecycle(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusFound {
 		t.Fatalf("create user: expected 302, got %d", resp.StatusCode)
+	}
+
+	// The redirect carries a ?success= flash message, and the page it
+	// points to renders it as a toast (see the "toast" template in
+	// partials.html) — this is the mechanism, not just the string.
+	successLoc := resp.Header.Get("Location")
+	if !strings.Contains(successLoc, "success=") {
+		t.Fatalf("expected create-user redirect to carry a success message, got Location=%q", successLoc)
+	}
+	toastResp, err := client.Get(srv.URL + successLoc)
+	if err != nil {
+		t.Fatalf("following create-user success redirect: %v", err)
+	}
+	toastBody, _ := io.ReadAll(toastResp.Body)
+	_ = toastResp.Body.Close()
+	if !strings.Contains(string(toastBody), `id="toast"`) || !strings.Contains(string(toastBody), "Usuario creado.") {
+		t.Fatalf("expected the resulting page to render a toast with the success message, got:\n%s", toastBody)
 	}
 
 	member, err := authStore.getUserByEmail(context.Background(), "member@example.com")
@@ -494,6 +525,39 @@ func TestPanelUserAndDeviceLifecycle(t *testing.T) {
 		if d.ID == toRevoke.ID {
 			t.Fatalf("expected device %s to be revoked", toRevoke.ID)
 		}
+	}
+}
+
+func TestAdminCreateUserRejectsMalformedEmail(t *testing.T) {
+	srv, _, authStore := setupPanelServer(t)
+	mustCreatePanelAdmin(t, authStore, "admin@example.com", "correct-horse-battery")
+
+	loginResp, err := http.Post(srv.URL+"/auth/login", "application/json",
+		strings.NewReader(`{"email":"admin@example.com","password":"correct-horse-battery","device_name":"api-test"}`))
+	if err != nil {
+		t.Fatalf("JSON login: %v", err)
+	}
+	body, _ := io.ReadAll(loginResp.Body)
+	_ = loginResp.Body.Close()
+	token := regexp.MustCompile(`"access_token":"([^"]+)"`).FindStringSubmatch(string(body))
+	if token == nil {
+		t.Fatalf("expected an access_token in the login response, got:\n%s", body)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/admin/users",
+		strings.NewReader(`{"email":"not-an-email","password":"member-pass-123"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token[1])
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /admin/users: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected a malformed email to be rejected with 400, got %d", resp.StatusCode)
+	}
+	if _, err := authStore.getUserByEmail(context.Background(), "not-an-email"); err == nil {
+		t.Fatalf("expected no user to be created for a malformed email")
 	}
 }
 
@@ -659,8 +723,8 @@ func TestPanelSettingsPage(t *testing.T) {
 		"max_devices_per_user":            {"3"},
 	})
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/admin/panel/settings" {
-		t.Fatalf("valid settings update: expected 302 to /admin/panel/settings, got %d Location=%q",
+	if resp.StatusCode != http.StatusFound || !strings.HasPrefix(resp.Header.Get("Location"), "/admin/panel/settings?success=") {
+		t.Fatalf("valid settings update: expected 302 to /admin/panel/settings?success=..., got %d Location=%q",
 			resp.StatusCode, resp.Header.Get("Location"))
 	}
 

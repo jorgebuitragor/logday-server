@@ -73,6 +73,7 @@ type formPageData struct {
 type usersPageData struct {
 	CSRFToken         string
 	Error             string
+	Success           string
 	Users             []user
 	Active            string
 	InstanceName      string
@@ -82,6 +83,7 @@ type usersPageData struct {
 type devicesPageData struct {
 	CSRFToken    string
 	Error        string
+	Success      string
 	Devices      []deviceWithOwner
 	Active       string
 	InstanceName string
@@ -90,6 +92,7 @@ type devicesPageData struct {
 type settingsPageData struct {
 	CSRFToken       string
 	Error           string
+	Success         string
 	Active          string
 	Settings        settings.Settings
 	GeneratedSecret string
@@ -98,6 +101,12 @@ type settingsPageData struct {
 
 func (h *Handler) redirectWithError(w http.ResponseWriter, r *http.Request, path, msg string) {
 	http.Redirect(w, r, path+"?error="+url.QueryEscape(msg), http.StatusFound)
+}
+
+// redirectWithSuccess drives the toast shown after a state-changing panel
+// action — see the "toast" template in partials.html.
+func (h *Handler) redirectWithSuccess(w http.ResponseWriter, r *http.Request, path, msg string) {
+	http.Redirect(w, r, path+"?success="+url.QueryEscape(msg), http.StatusFound)
 }
 
 // instanceName reads the configurable instance name (Configuración >
@@ -158,6 +167,9 @@ func (h *Handler) setupSubmit(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case email == "" || password == "":
 		renderSetupError("email y contraseña son obligatorios")
+		return
+	case !validEmail(email):
+		renderSetupError("ese email no es válido")
 		return
 	case len(password) < cfg.MinPasswordLength:
 		renderSetupError(fmt.Sprintf("la contraseña debe tener al menos %d caracteres", cfg.MinPasswordLength))
@@ -288,8 +300,8 @@ func (h *Handler) panelUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	renderTemplate(w, h.tmpl, http.StatusOK, "users.html", usersPageData{
-		CSRFToken: csrf, Users: users, Error: r.URL.Query().Get("error"), Active: "users",
-		InstanceName: h.instanceName(r.Context()), MinPasswordLength: cfg.MinPasswordLength,
+		CSRFToken: csrf, Users: users, Error: r.URL.Query().Get("error"), Success: r.URL.Query().Get("success"),
+		Active: "users", InstanceName: h.instanceName(r.Context()), MinPasswordLength: cfg.MinPasswordLength,
 	})
 }
 
@@ -318,6 +330,9 @@ func (h *Handler) panelCreateUser(w http.ResponseWriter, r *http.Request) {
 		h.redirectWithError(w, r, "/admin/panel",
 			fmt.Sprintf("email y contraseña (mínimo %d caracteres) son obligatorios", cfg.MinPasswordLength))
 		return
+	case !validEmail(email):
+		h.redirectWithError(w, r, "/admin/panel", "ese email no es válido")
+		return
 	case !cfg.EmailDomainAllowed(email):
 		h.redirectWithError(w, r, "/admin/panel", "el dominio de ese email no está permitido en esta instancia")
 		return
@@ -336,7 +351,7 @@ func (h *Handler) panelCreateUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/admin/panel", http.StatusFound)
+	h.redirectWithSuccess(w, r, "/admin/panel", "Usuario creado.")
 }
 
 func (h *Handler) panelPromote(w http.ResponseWriter, r *http.Request) {
@@ -368,7 +383,11 @@ func (h *Handler) panelSetAdmin(w http.ResponseWriter, r *http.Request, isAdmin 
 		}
 		return
 	}
-	http.Redirect(w, r, "/admin/panel", http.StatusFound)
+	if isAdmin {
+		h.redirectWithSuccess(w, r, "/admin/panel", "Usuario promovido a admin.")
+	} else {
+		h.redirectWithSuccess(w, r, "/admin/panel", "Permisos de admin removidos.")
+	}
 }
 
 func (h *Handler) panelDeleteUser(w http.ResponseWriter, r *http.Request) {
@@ -392,7 +411,7 @@ func (h *Handler) panelDeleteUser(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	http.Redirect(w, r, "/admin/panel", http.StatusFound)
+	h.redirectWithSuccess(w, r, "/admin/panel", "Usuario dado de baja.")
 }
 
 func (h *Handler) panelRestoreUser(w http.ResponseWriter, r *http.Request) {
@@ -413,7 +432,7 @@ func (h *Handler) panelRestoreUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/admin/panel", http.StatusFound)
+	h.redirectWithSuccess(w, r, "/admin/panel", "Usuario restaurado.")
 }
 
 func (h *Handler) panelResetPassword(w http.ResponseWriter, r *http.Request) {
@@ -451,7 +470,7 @@ func (h *Handler) panelResetPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/admin/panel", http.StatusFound)
+	h.redirectWithSuccess(w, r, "/admin/panel", "Contraseña reseteada.")
 }
 
 func (h *Handler) panelDevices(w http.ResponseWriter, r *http.Request) {
@@ -465,8 +484,10 @@ func (h *Handler) panelDevices(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	renderTemplate(w, h.tmpl, http.StatusOK, "devices.html",
-		devicesPageData{CSRFToken: csrf, Devices: devices, Error: r.URL.Query().Get("error"), Active: "devices", InstanceName: h.instanceName(r.Context())})
+	renderTemplate(w, h.tmpl, http.StatusOK, "devices.html", devicesPageData{
+		CSRFToken: csrf, Devices: devices, Error: r.URL.Query().Get("error"), Success: r.URL.Query().Get("success"),
+		Active: "devices", InstanceName: h.instanceName(r.Context()),
+	})
 }
 
 func (h *Handler) panelRevokeDevice(w http.ResponseWriter, r *http.Request) {
@@ -483,7 +504,7 @@ func (h *Handler) panelRevokeDevice(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/admin/panel/devices", http.StatusFound)
+	h.redirectWithSuccess(w, r, "/admin/panel/devices", "Dispositivo revocado.")
 }
 
 func (h *Handler) panelSettings(w http.ResponseWriter, r *http.Request) {
@@ -502,6 +523,7 @@ func (h *Handler) panelSettings(w http.ResponseWriter, r *http.Request) {
 		Active:          "settings",
 		Settings:        *cfg,
 		Error:           r.URL.Query().Get("error"),
+		Success:         r.URL.Query().Get("success"),
 		GeneratedSecret: r.URL.Query().Get("generated_secret"),
 		InstanceName:    cfg.InstanceName,
 	})
@@ -578,7 +600,7 @@ func (h *Handler) panelUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/admin/panel/settings", http.StatusFound)
+	h.redirectWithSuccess(w, r, "/admin/panel/settings", "Configuración guardada.")
 }
 
 // normalizeEmailDomains trims/lowercases each comma-separated entry and

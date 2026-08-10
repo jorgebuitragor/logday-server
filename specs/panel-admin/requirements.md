@@ -37,6 +37,14 @@ depender de quien sepa manejar la API cruda.
   liste todos los usuarios de la instancia (activos y dados de baja).
 - El sistema DEBERÁ permitir que un admin cree usuarios nuevos desde el
   panel, con los mismos datos que ya acepta `POST /admin/users`.
+- El sistema DEBERÁ validar el formato del email en toda vía de creación
+  de usuario (panel, API JSON, setup inicial) antes de aceptarlo — sin
+  esto no tiene sentido el filtro de dominios permitidos, que asume un
+  email con forma válida.
+- El sistema DEBERÁ confirmar visualmente al admin cuando una acción del
+  panel se completa (crear/promover/degradar/dar de baja/restaurar
+  usuario, resetear contraseña, revocar device, guardar configuración),
+  no solo cuando falla.
 - El sistema DEBERÁ permitir que un admin promueva o degrade el rol de
   admin de otro usuario.
 - El sistema NO DEBERÁ permitir dejar la instancia sin ningún admin

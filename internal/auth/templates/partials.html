@@ -37,6 +37,7 @@
     --accent-soft:   rgba(129, 140, 248, 0.22);
     --accent-ink:    #c7d2fe;
     --danger:        #f87171;
+    --success:       #4ade80;
     --shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
   }
   /* Light tokens apply either automatically (OS preference, unless the
@@ -226,6 +227,22 @@
     padding: 0.65rem 0.9rem; margin-bottom: 1.25rem; font-size: 0.85rem;
   }
 
+  .toast {
+    position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 1000;
+    display: flex; align-items: center; gap: 0.5rem;
+    background: var(--bg-elevated); color: var(--text-primary);
+    border: 1px solid var(--border-card); border-radius: 12px;
+    box-shadow: var(--shadow); padding: 0.75rem 1rem; font-size: 0.85rem;
+    animation: toast-spring-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+  }
+  .toast .icon { color: var(--success); flex-shrink: 0; }
+  .toast.toast-hide { opacity: 0; transform: translateY(8px); }
+  @keyframes toast-spring-in {
+    from { opacity: 0; transform: translateY(8px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
   .card {
     max-width: 380px; margin: 4rem auto; padding: 2rem;
     background: var(--bg-elevated); border: 1px solid var(--border-card);
@@ -312,6 +329,30 @@
 </header>
 {{template "theme-toggle-script"}}
 {{template "confirm-dialog"}}
+{{template "toast" .}}
+{{end}}
+
+{{/* toast shows a one-off success message after a redirect (the
+     post/redirect/get "flash message" pattern — the handler that
+     performed the action redirects with ?success=mensaje, the
+     resulting GET renders it here once, server-side, then this fades
+     itself out client-side after a few seconds). Only rendered when
+     .Success is set, so pages that don't pass that field (there's
+     nothing today that doesn't) just render nothing. */}}
+{{define "toast"}}
+{{if .Success}}
+<div class="toast" id="toast" role="status" aria-live="polite">{{template "icon-shield-check"}} {{.Success}}</div>
+<script>
+(function () {
+  var toast = document.getElementById('toast');
+  if (!toast) return;
+  setTimeout(function () {
+    toast.classList.add('toast-hide');
+    setTimeout(function () { toast.remove(); }, 250);
+  }, 3500);
+})();
+</script>
+{{end}}
 {{end}}
 
 {{/* confirm-dialog is a single shared <dialog> per page: any
