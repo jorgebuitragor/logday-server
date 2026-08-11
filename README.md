@@ -65,6 +65,14 @@ crear un segundo "primer admin".
 Cualquiera de las dos formas te deja con una cuenta admin que puede
 loguearse en `http://<tu-host>:8080/admin/panel/login`.
 
+## API para clientes
+
+El contrato completo de la API de sync (auth, CRUD por recurso, feed de
+`/sync/changes` y el protocolo de `/ws`) está documentado en
+[`openapi.yaml`](./openapi.yaml) (OpenAPI 3.0.3) — abrilo en
+[Swagger Editor](https://editor.swagger.io) o con cualquier visor de OpenAPI
+para navegarlo.
+
 ## Panel de administración
 
 Una vez que existe al menos un admin, `http://<tu-host>:8080/admin/panel`

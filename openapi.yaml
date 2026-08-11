@@ -1,0 +1,1491 @@
+openapi: 3.0.3
+info:
+  title: Logday Server API
+  description: |
+    API de sync self-hosted para [Logday](https://github.com/jorgebuitragor/logday),
+    al estilo Vaultwarden/Bitwarden. Un cliente (desktop, web, móvil, extensión)
+    apunta a la URL de una instancia self-hosted y usa esta API para sincronizar
+    sus datos entre dispositivos.
+
+    ## Modelo de autenticación
+
+    - No hay auto-registro. Los usuarios los crea un admin (`POST /admin/users`
+      o el panel web), salvo el primer admin de la instancia (`/setup` o
+      variables de entorno `ADMIN_EMAIL`/`ADMIN_PASSWORD`, ver README).
+    - `POST /auth/login` devuelve un `access_token` (JWT de corta duración,
+      usado como `Authorization: Bearer <token>` en cada request) y un
+      `refresh_token` (opaco, de larga duración, ligado a un `device_id`).
+    - Cuando el access token expira, `POST /auth/refresh` cambia el refresh
+      token (rotación: el anterior queda invalidado; reusarlo revoca el
+      dispositivo — indicio de robo de token).
+    - Los TTLs de ambos tokens y el límite de dispositivos por usuario son
+      configurables por el admin desde el panel (`internal/settings`), por lo
+      que no son constantes fijas — un cliente no debe asumir valores.
+
+    ## Modelo de sync
+
+    Cada recurso (`tasks`, `notes`, `overtime-entries`, `overtime-month-meta`,
+    `calendar-events`, `absence-days`, `daily-entries`) expone su propio CRUD
+    REST **y** participa en el feed unificado `GET /sync/changes`. Un cliente
+    típico:
+
+    1. Al arrancar (o tras perder el cursor): pide `GET /sync/changes` sin
+       `since` para traer todo, y guarda el `seq` más alto recibido como
+       cursor local.
+    2. En cada sync incremental: pide `GET /sync/changes?since=<cursor>`.
+    3. Para enterarse de cambios en tiempo real sin hacer polling: abre
+       `GET /ws`, y al recibir una notificación vuelve a pedir
+       `GET /sync/changes?since=<cursor>` (la notificación es un aviso
+       liviano, nunca el registro completo).
+    4. Para escribir: usa el endpoint REST del recurso (no hay escritura vía
+       `/sync/changes`, que es sólo de lectura).
+
+    La mayoría de los recursos usan **Last-Write-Wins por fila completa**:
+    el servidor rechaza con `409 Conflict` un `POST`/`PUT` cuyo `updated_at`
+    no sea estrictamente posterior al ya guardado. El contenido de notas
+    (`notes.content`) y de entradas diarias (`daily-entries`) es CRDT
+    (compatible con Yjs) y en cambio **nunca rechaza por antigüedad**: los
+    updates se mergean siempre, vía su propio endpoint de contenido en base64.
+
+    Casi todos los IDs de recursos son generados por el cliente (UUID
+    recomendado) y viajan en el body en `POST` o en la URL en `PUT` — no los
+    asigna el servidor, porque el cliente los necesita para funcionar
+    offline-first antes de sincronizar.
+
+    ## Formato de errores
+
+    Los errores **no son JSON**: son `text/plain`, un mensaje corto en el
+    body con el status code correspondiente (`http.Error` de Go). Se
+    documentan igual en cada operación para que un cliente sepa qué status
+    esperar, pero el body debe tratarse como texto libre para mostrar al
+    usuario, no parsearse como JSON.
+  version: "1.0.0"
+externalDocs:
+  description: Specs de diseño (spec-driven development)
+  url: ./specs/README.md
+
+servers:
+  - url: http://localhost:8080
+    description: Instancia local (docker compose por defecto)
+  - url: https://{host}
+    description: Instancia self-hosted detrás de un reverse proxy con TLS
+    variables:
+      host:
+        default: logday.tudominio.com
+
+tags:
+  - name: Sistema
+    description: Endpoints sin autenticación para operar la instancia.
+  - name: Auth
+    description: Login, refresh y gestión de dispositivos/sesiones propias.
+  - name: Admin
+    description: Endpoints que requieren un usuario con `is_admin = true`.
+  - name: Sync
+    description: Feed unificado de cambios para sincronización incremental.
+  - name: Realtime
+    description: Notificaciones en tiempo real vía WebSocket.
+  - name: Tasks
+    description: CRUD de tasks, con contenido en texto plano (LWW).
+  - name: Notes
+    description: CRUD de metadatos de notas (LWW) y su contenido, CRDT y separado.
+  - name: Overtime
+    description: Entradas de horas extra y sus metadatos por mes (colaborador/cédula).
+  - name: Calendar
+    description: CRUD de eventos de calendario.
+  - name: Absence
+    description: CRUD de días de ausencia (incapacidad, vacaciones, otro).
+  - name: Daily Entries
+    description: Entrada de texto libre por día, CRDT-backed.
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      operationId: healthCheck
+      tags: [Sistema]
+      summary: Estado de salud de la instancia
+      description: Sin autenticación. Verifica conectividad con la base de datos.
+      security: []
+      responses:
+        "200":
+          description: La instancia está sana.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: ok
+        "503":
+          description: La base de datos no responde.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: database unavailable
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [Auth]
+      summary: Login y creación de un nuevo dispositivo/sesión
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login exitoso. Guardar `refresh_token` y `device_id` de forma persistente en el cliente.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Credenciales inválidas.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: invalid credentials
+        "403":
+          description: Se alcanzó el límite de dispositivos por usuario configurado en la instancia.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: device limit reached, revoke a device first
+        "429":
+          description: Demasiados intentos de login fallidos para este email/IP. Reintentar más tarde.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: too many attempts, try again later
+
+  /auth/refresh:
+    post:
+      operationId: refreshToken
+      tags: [Auth]
+      summary: Rota el refresh token y emite un nuevo access token
+      description: |
+        El refresh token devuelto reemplaza al usado en la request — descartar
+        el anterior. Reusar un refresh token ya rotado revoca el dispositivo
+        (se trata como indicio de robo de token), invalidando toda la sesión.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: Tokens renovados.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Refresh token inválido, ya usado (y por lo tanto revocado) o expirado.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: invalid refresh token
+
+  /devices:
+    get:
+      operationId: listDevices
+      tags: [Auth]
+      summary: Lista los dispositivos/sesiones del usuario autenticado
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Device"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /devices/{id}:
+    delete:
+      operationId: revokeDevice
+      tags: [Auth]
+      summary: Revoca un dispositivo/sesión propio
+      description: Invalida su refresh token; el access token ya emitido sigue vigente hasta que expire por su cuenta (no hay revocación de access tokens en curso).
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "204":
+          description: Dispositivo revocado.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No existe ese dispositivo para el usuario autenticado.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: device not found
+
+  /admin/users:
+    post:
+      operationId: createUser
+      tags: [Admin]
+      summary: Crea un usuario nuevo
+      description: Requiere que el usuario autenticado sea admin. Alternativa programática al panel web.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: Usuario creado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Body inválido, email/password faltante o inválido, password bajo el mínimo configurado, o dominio de email no permitido.
+          content:
+            text/plain:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Ya existe un usuario con ese email.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: email already exists
+
+  /sync/changes:
+    get:
+      operationId: getSyncChanges
+      tags: [Sync]
+      summary: Feed unificado de cambios de todos los recursos sincronizables
+      description: |
+        Sólo lectura — devuelve un `change` por cada fila creada, actualizada
+        o borrada (soft-delete, `deleted: true`) desde `since`, ordenados por
+        `seq` ascendente. `seq` es un contador monótono por usuario, compartido
+        entre todos los tipos de recurso; el cliente debe guardar el `seq` más
+        alto visto como su próximo cursor `since`.
+      parameters:
+        - name: since
+          in: query
+          description: Cursor de la última sync (mayor `seq` ya procesado). Omitir (o `0`) para una sync completa.
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: OK — puede ser un array vacío si no hay cambios.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SyncChange"
+        "400":
+          description: "`since` no es un entero válido o es negativo."
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: invalid since parameter
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "410":
+          description: |
+            El cursor es anterior al watermark de purga de tombstones de la
+            instancia (los borrados corren un `PurgeTombstones` diario) — ya
+            no se puede reconstruir el delta. El cliente debe reintentar sin
+            `since` (full resync).
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "cursor is no longer valid, perform a full resync (retry without since)"
+
+  /ws:
+    get:
+      operationId: connectRealtime
+      tags: [Realtime]
+      summary: Upgrade a WebSocket para notificaciones de cambios en tiempo real
+      description: |
+        **No es un GET HTTP normal**: es un upgrade de protocolo a WebSocket
+        (OpenAPI no tiene un tipo nativo para WS; se documenta acá por
+        descubribilidad). No usa el middleware de auth HTTP habitual porque
+        un WebSocket handshake de navegador no puede llevar el header
+        `Authorization` — la autenticación ocurre sobre el socket, como
+        primer mensaje.
+
+        **Protocolo:**
+        1. El cliente abre la conexión WS a `GET /ws` (sin `Authorization`).
+        2. El cliente envía, como primer mensaje de texto, un JSON
+           `{"type":"auth","token":"<access_token>"}`. Tiene 5 segundos para
+           hacerlo o el servidor cierra la conexión.
+        3. Si el token es válido, el servidor deja la conexión abierta y no
+           responde nada al mensaje de auth — sólo empieza a enviar
+           notificaciones futuras. Si es inválido, cierra con código de
+           policy violation.
+        4. Por cada escritura (create/update/delete) que ocurra en cualquier
+           dispositivo del mismo usuario, el servidor envía un mensaje
+           `{"type":"<entity_type>","id":"<id>","seq":<seq>}`. `entity_type`
+           es uno de: `task`, `note`, `overtime_entry`, `overtime_month_meta`,
+           `calendar_event`, `absence_day`, `daily_entry`.
+        5. La notificación es liviana a propósito (nunca el registro
+           completo, y puede perderse si el buffer del cliente está lleno):
+           al recibirla, el cliente debe llamar a
+           `GET /sync/changes?since=<cursor>` para traer el cambio real. La
+           notificación es sólo un "hey, algo cambió, andá a preguntar".
+        6. El servidor hace ping cada 30s; si no hay pong en 10s cierra la
+           conexión. El cliente debe reconectar con backoff y, al reconectar,
+           siempre re-sincronizar vía `/sync/changes` (pudo haber perdido
+           notificaciones mientras estaba desconectado).
+        7. Cualquier mensaje del cliente después del de auth se ignora (el
+           canal es sólo de notificación servidor→cliente).
+      responses:
+        "101":
+          description: |
+            Switching Protocols — upgrade a WebSocket exitoso. A partir de acá
+            la conexión deja de ser HTTP y sigue el protocolo descrito arriba.
+
+            Nota: si falta el mensaje de auth, llega tarde, o el token es
+            inválido/expirado, no hay una respuesta HTTP de error — el
+            servidor simplemente cierra la conexión WebSocket ya establecida
+            con el close code `1008` (policy violation).
+
+  /tasks:
+    get:
+      operationId: listTasks
+      tags: [Tasks]
+      summary: Lista todas las tasks del usuario (incluyendo borradas — ver `deleted_at`)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Task"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: upsertTaskByBody
+      tags: [Tasks]
+      summary: Crea o actualiza una task (upsert por `id` del body)
+      description: |
+        El `id` va en el body y es generado por el cliente. Si ya existe una
+        task con ese `id` del mismo usuario, este endpoint la actualiza igual
+        que `PUT /tasks/{id}` (upsert con chequeo LWW) — no hay una distinción
+        real entre "crear" y "actualizar" salvo de dónde viene el `id`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskWrite"
+      responses:
+        "200":
+          description: Task creada o actualizada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Ya existe una task con ese `id` perteneciente a otro usuario.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: task belongs to another user
+        "409":
+          description: Ya existe una versión más nueva guardada (LWW) — descartar esta escritura o reintentar con un `updated_at` posterior.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: a newer version of this task already exists
+
+  /tasks/{id}:
+    put:
+      operationId: upsertTaskById
+      tags: [Tasks]
+      summary: Crea o actualiza una task (upsert por `id` de la URL)
+      parameters:
+        - $ref: "#/components/parameters/ResourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskWrite"
+      responses:
+        "200":
+          description: Task creada o actualizada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: La task pertenece a otro usuario.
+          content:
+            text/plain: { schema: { type: string } }
+        "409":
+          description: Conflicto LWW — ya existe una versión más nueva.
+          content:
+            text/plain: { schema: { type: string } }
+    delete:
+      operationId: deleteTask
+      tags: [Tasks]
+      summary: Soft-delete de una task
+      parameters:
+        - $ref: "#/components/parameters/ResourceId"
+      responses:
+        "204":
+          description: "Borrada (tombstone). Aparecerá en `/sync/changes` con `deleted: true` hasta que se purgue."
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: La task pertenece a otro usuario.
+          content:
+            text/plain: { schema: { type: string } }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /notes:
+    get:
+      operationId: listNotes
+      tags: [Notes]
+      summary: Lista todas las notas del usuario
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Note"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: upsertNoteByBody
+      tags: [Notes]
+      summary: Crea o actualiza los metadatos de una nota (upsert por `id` del body)
+      description: |
+        Este endpoint sólo escribe los campos LWW (título, folder, tags,
+        pinned, etc.) — **nunca** toca el contenido. El contenido se escribe
+        exclusivamente vía `POST /notes/{id}/content`, que es CRDT y no
+        participa del chequeo de `updated_at`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NoteWrite"
+      responses:
+        "200":
+          description: Nota creada o actualizada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Note"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: La nota pertenece a otro usuario.
+          content:
+            text/plain: { schema: { type: string } }
+        "409":
+          description: Conflicto LWW en los metadatos.
+          content:
+            text/plain: { schema: { type: string } }
+
+  /notes/{id}:
+    put:
+      operationId: upsertNoteById
+      tags: [Notes]
+      summary: Crea o actualiza los metadatos de una nota (upsert por `id` de la URL)
+      parameters:
+        - $ref: "#/components/parameters/ResourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NoteWrite"
+      responses:
+        "200":
+          description: Nota creada o actualizada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Note"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: La nota pertenece a otro usuario.
+          content:
+            text/plain: { schema: { type: string } }
+        "409":
+          description: Conflicto LWW en los metadatos.
+          content:
+            text/plain: { schema: { type: string } }
+    delete:
+      operationId: deleteNote
+      tags: [Notes]
+      summary: Soft-delete de una nota (metadatos y contenido)
+      parameters:
+        - $ref: "#/components/parameters/ResourceId"
+      responses:
+        "204":
+          description: Borrada (tombstone).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: La nota pertenece a otro usuario.
+          content:
+            text/plain: { schema: { type: string } }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /notes/{id}/content:
+    post:
+      operationId: updateNoteContent
+      tags: [Notes]
+      summary: Mergea un update CRDT del contenido de la nota
+      description: |
+        A diferencia de `PUT /notes/{id}`, esto **nunca rechaza por
+        antigüedad**: los updates CRDT conmutan y son idempotentes, así que
+        siempre se aplican y mergean con el estado guardado, sin importar el
+        orden de llegada entre dispositivos. `content_update` es un update
+        binario (formato Yjs) codificado en base64 — no el texto completo.
+      parameters:
+        - $ref: "#/components/parameters/ResourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContentUpdateRequest"
+      responses:
+        "200":
+          description: Update aplicado — devuelve la nota completa con el contenido ya mergeado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Note"
+        "400":
+          description: Body inválido, falta `content_update`/`updated_at`, o `content_update` no es base64 válido.
+          content:
+            text/plain: { schema: { type: string } }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: La nota pertenece a otro usuario.
+          content:
+            text/plain: { schema: { type: string } }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /overtime-entries:
+    get:
+      operationId: listOvertimeEntries
+      tags: [Overtime]
+      summary: Lista todas las entradas de horas extra del usuario
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OvertimeEntry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: upsertOvertimeEntryByBody
+      tags: [Overtime]
+      summary: Crea o actualiza una entrada (upsert por `id` del body)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OvertimeEntryWrite"
+      responses:
+        "200":
+          description: Entrada creada o actualizada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OvertimeEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: La entrada pertenece a otro usuario.
+          content:
+            text/plain: { schema: { type: string } }
+        "409":
+          description: Conflicto LWW.
+          content:
+            text/plain: { schema: { type: string } }
+
+  /overtime-entries/{id}:
+    put:
+      operationId: upsertOvertimeEntryById
+      tags: [Overtime]
+      summary: Crea o actualiza una entrada (upsert por `id` de la URL)
+      parameters:
+        - $ref: "#/components/parameters/ResourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OvertimeEntryWrite"
+      responses:
+        "200":
+          description: Entrada creada o actualizada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OvertimeEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: La entrada pertenece a otro usuario.
+          content:
+            text/plain: { schema: { type: string } }
+        "409":
+          description: Conflicto LWW.
+          content:
+            text/plain: { schema: { type: string } }
+    delete:
+      operationId: deleteOvertimeEntry
+      tags: [Overtime]
+      summary: Soft-delete de una entrada
+      parameters:
+        - $ref: "#/components/parameters/ResourceId"
+      responses:
+        "204":
+          description: Borrada (tombstone).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: La entrada pertenece a otro usuario.
+          content:
+            text/plain: { schema: { type: string } }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /overtime-month-meta:
+    get:
+      operationId: listOvertimeMonthMeta
+      tags: [Overtime]
+      summary: Lista los metadatos por mes (colaborador/cédula) del usuario
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OvertimeMonthMeta"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /overtime-month-meta/{yearMonth}:
+    put:
+      operationId: upsertOvertimeMonthMeta
+      tags: [Overtime]
+      summary: Crea o actualiza los metadatos de un mes
+      description: No hay `id` propio — la clave natural es `(user_id, year_month)`, y `yearMonth` en la URL cumple ese rol tanto en la escritura como en `/sync/changes`.
+      parameters:
+        - name: yearMonth
+          in: path
+          required: true
+          description: "Formato `YYYY-MM`."
+          schema:
+            type: string
+            example: "2026-08"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OvertimeMonthMetaWrite"
+      responses:
+        "200":
+          description: Metadatos creados o actualizados.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OvertimeMonthMeta"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: Conflicto LWW.
+          content:
+            text/plain: { schema: { type: string } }
+    delete:
+      operationId: deleteOvertimeMonthMeta
+      tags: [Overtime]
+      summary: Soft-delete de los metadatos de un mes
+      parameters:
+        - name: yearMonth
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "2026-08"
+      responses:
+        "204":
+          description: Borrados (tombstone).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /calendar-events:
+    get:
+      operationId: listCalendarEvents
+      tags: [Calendar]
+      summary: Lista todos los eventos de calendario del usuario
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CalendarEvent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: upsertCalendarEventByBody
+      tags: [Calendar]
+      summary: Crea o actualiza un evento (upsert por `id` del body)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CalendarEventWrite"
+      responses:
+        "200":
+          description: Evento creado o actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalendarEvent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: El evento pertenece a otro usuario.
+          content:
+            text/plain: { schema: { type: string } }
+        "409":
+          description: Conflicto LWW.
+          content:
+            text/plain: { schema: { type: string } }
+
+  /calendar-events/{id}:
+    put:
+      operationId: upsertCalendarEventById
+      tags: [Calendar]
+      summary: Crea o actualiza un evento (upsert por `id` de la URL)
+      parameters:
+        - $ref: "#/components/parameters/ResourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CalendarEventWrite"
+      responses:
+        "200":
+          description: Evento creado o actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalendarEvent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: El evento pertenece a otro usuario.
+          content:
+            text/plain: { schema: { type: string } }
+        "409":
+          description: Conflicto LWW.
+          content:
+            text/plain: { schema: { type: string } }
+    delete:
+      operationId: deleteCalendarEvent
+      tags: [Calendar]
+      summary: Soft-delete de un evento
+      parameters:
+        - $ref: "#/components/parameters/ResourceId"
+      responses:
+        "204":
+          description: Borrado (tombstone).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: El evento pertenece a otro usuario.
+          content:
+            text/plain: { schema: { type: string } }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /absence-days:
+    get:
+      operationId: listAbsenceDays
+      tags: [Absence]
+      summary: Lista todos los días de ausencia del usuario
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AbsenceDay"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: upsertAbsenceDayByBody
+      tags: [Absence]
+      summary: Crea o actualiza un día de ausencia (upsert por `id` del body)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AbsenceDayWrite"
+      responses:
+        "200":
+          description: Día creado o actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AbsenceDay"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: El día pertenece a otro usuario.
+          content:
+            text/plain: { schema: { type: string } }
+        "409":
+          description: Conflicto LWW.
+          content:
+            text/plain: { schema: { type: string } }
+
+  /absence-days/{id}:
+    put:
+      operationId: upsertAbsenceDayById
+      tags: [Absence]
+      summary: Crea o actualiza un día de ausencia (upsert por `id` de la URL)
+      parameters:
+        - $ref: "#/components/parameters/ResourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AbsenceDayWrite"
+      responses:
+        "200":
+          description: Día creado o actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AbsenceDay"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: El día pertenece a otro usuario.
+          content:
+            text/plain: { schema: { type: string } }
+        "409":
+          description: Conflicto LWW.
+          content:
+            text/plain: { schema: { type: string } }
+    delete:
+      operationId: deleteAbsenceDay
+      tags: [Absence]
+      summary: Soft-delete de un día de ausencia
+      parameters:
+        - $ref: "#/components/parameters/ResourceId"
+      responses:
+        "204":
+          description: Borrado (tombstone).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: El día pertenece a otro usuario.
+          content:
+            text/plain: { schema: { type: string } }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /daily-entries:
+    get:
+      operationId: listDailyEntries
+      tags: [Daily Entries]
+      summary: Lista todas las entradas diarias del usuario
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DailyEntry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /daily-entries/{date}:
+    put:
+      operationId: updateDailyEntryContent
+      tags: [Daily Entries]
+      summary: Mergea un update CRDT del contenido de la entrada del día
+      description: |
+        No hay `POST`: la entrada se identifica desde el inicio por su clave
+        natural `(user_id, date)`, así que `PUT` (upsert por URL) es el único
+        verbo de escritura. Igual que `POST /notes/{id}/content`, es CRDT y
+        nunca rechaza por antigüedad — `content_update` es un update binario
+        (Yjs) en base64 que se mergea con el estado guardado.
+      parameters:
+        - name: date
+          in: path
+          required: true
+          description: "Formato `YYYY-MM-DD`."
+          schema:
+            type: string
+            format: date
+            example: "2026-08-11"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContentUpdateRequest"
+      responses:
+        "200":
+          description: Update aplicado — devuelve la entrada completa con el contenido ya mergeado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DailyEntry"
+        "400":
+          description: Body inválido, falta `content_update`/`updated_at`, o `content_update` no es base64 válido.
+          content:
+            text/plain: { schema: { type: string } }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      operationId: deleteDailyEntry
+      tags: [Daily Entries]
+      summary: Soft-delete de la entrada de un día
+      parameters:
+        - name: date
+          in: path
+          required: true
+          schema:
+            type: string
+            format: date
+            example: "2026-08-11"
+      responses:
+        "204":
+          description: Borrada (tombstone).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Access token devuelto por `/auth/login` o `/auth/refresh`, enviado como `Authorization: Bearer <access_token>`."
+
+  parameters:
+    ResourceId:
+      name: id
+      in: path
+      required: true
+      description: ID generado por el cliente (UUID recomendado) al crear el recurso.
+      schema:
+        type: string
+    DeviceId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+
+  responses:
+    BadRequest:
+      description: Body inválido o falla una validación de campo (ver el mensaje).
+      content:
+        text/plain:
+          schema:
+            type: string
+    Unauthorized:
+      description: Falta el header `Authorization`, o el access token es inválido/expiró.
+      content:
+        text/plain:
+          schema:
+            type: string
+            example: invalid or expired token
+    Forbidden:
+      description: El usuario autenticado no es admin.
+      content:
+        text/plain:
+          schema:
+            type: string
+            example: admin access required
+    NotFound:
+      description: El recurso no existe (o ya estaba borrado) para este usuario.
+      content:
+        text/plain:
+          schema:
+            type: string
+
+  schemas:
+    # --- Auth ---
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+        device_name:
+          type: string
+          description: "Nombre legible del dispositivo, mostrado en `GET /devices` y el panel de admin. Por defecto `\"unknown device\"` si se omite."
+          example: "iPhone de Jorge"
+
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+
+    TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: "JWT de corta duración (TTL configurable por el admin). Enviar como `Authorization: Bearer <access_token>`."
+        refresh_token:
+          type: string
+          description: Token opaco de larga duración. Guardar de forma segura — reemplaza al anterior en cada `/auth/refresh`.
+        device_id:
+          type: string
+
+    Device:
+      type: object
+      properties:
+        id:
+          type: string
+        device_name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+
+    CreateUserRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          description: Debe cumplir el largo mínimo configurado en la instancia (8 caracteres por defecto).
+        is_admin:
+          type: boolean
+          default: false
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        is_admin:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    # --- Sync ---
+    SyncChange:
+      type: object
+      description: Un cambio (creación, actualización o borrado) de cualquier recurso sincronizable.
+      properties:
+        type:
+          type: string
+          enum: [task, note, overtime_entry, overtime_month_meta, calendar_event, absence_day, daily_entry]
+        id:
+          type: string
+          description: "Para `overtime_month_meta` es el `year_month`; para `daily_entry` es la `date`. Para el resto, el `id` del recurso."
+        seq:
+          type: integer
+          format: int64
+          description: Cursor monótono por usuario, compartido entre todos los tipos — usar el máximo visto como próximo `since`.
+        deleted:
+          type: boolean
+          description: "`true` si este cambio es un tombstone (soft-delete). `data` sigue presente pero el cliente debe tratarlo como borrado."
+        updated_at:
+          type: string
+          format: date-time
+        data:
+          description: El recuerdo completo del recurso, con la misma forma que devuelve su propio endpoint REST (`Task`, `Note`, etc.).
+          type: object
+
+    # --- Tasks ---
+    TaskWrite:
+      type: object
+      required: [id, title, status, created, updated_at]
+      properties:
+        id:
+          type: string
+          description: Generado por el cliente. En `PUT /tasks/{id}` se ignora este campo y se usa el `id` de la URL.
+        title:
+          type: string
+        task_code:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [todo, in-progress, done]
+        tags:
+          type: array
+          items:
+            type: string
+        project:
+          type: string
+        created:
+          type: string
+          description: Timestamp de creación definido por el cliente (string libre, no necesariamente ISO 8601).
+        completed_at:
+          type: string
+          nullable: true
+        due:
+          type: string
+          nullable: true
+        content:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+          description: Debe ser estrictamente posterior al `updated_at` guardado, o el servidor responde `409`.
+    Task:
+      allOf:
+        - $ref: "#/components/schemas/TaskWrite"
+        - type: object
+          properties:
+            seq:
+              type: integer
+              format: int64
+            deleted_at:
+              type: string
+              format: date-time
+              nullable: true
+
+    # --- Notes ---
+    NoteWrite:
+      type: object
+      required: [id, title, created, updated_at]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        folder:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        created:
+          type: string
+        updated:
+          type: string
+        pinned:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+    Note:
+      allOf:
+        - $ref: "#/components/schemas/NoteWrite"
+        - type: object
+          properties:
+            content:
+              type: string
+              description: Texto plano derivado del estado CRDT — de solo lectura, se escribe vía `POST /notes/{id}/content`.
+            content_state:
+              type: string
+              description: Estado CRDT completo (formato Yjs) codificado en base64 — de solo lectura, útil para que el cliente lo cargue directo en su propio doc CRDT en vez de reconstruirlo de `content`.
+            seq:
+              type: integer
+              format: int64
+            deleted_at:
+              type: string
+              format: date-time
+              nullable: true
+
+    ContentUpdateRequest:
+      type: object
+      required: [content_update, updated_at]
+      properties:
+        content_update:
+          type: string
+          format: byte
+          description: Update CRDT binario (formato Yjs) codificado en base64. No es el texto completo — es un delta que se mergea con el estado guardado.
+        updated_at:
+          type: string
+          format: date-time
+
+    # --- Overtime ---
+    OvertimeEntryWrite:
+      type: object
+      required: [id, fecha, updated_at]
+      properties:
+        id:
+          type: string
+        fecha:
+          type: string
+          format: date
+        solicitada_por:
+          type: string
+        actividad:
+          type: string
+        observaciones:
+          type: string
+        hora_inicio:
+          type: string
+        hora_final:
+          type: string
+        total_horas:
+          type: number
+          format: double
+        extras_diurnas:
+          type: number
+          format: double
+        extras_nocturnas:
+          type: number
+          format: double
+        extras_diurnas_festivas:
+          type: number
+          format: double
+        extras_nocturnas_festivas:
+          type: number
+          format: double
+        updated_at:
+          type: string
+          format: date-time
+    OvertimeEntry:
+      allOf:
+        - $ref: "#/components/schemas/OvertimeEntryWrite"
+        - type: object
+          properties:
+            seq:
+              type: integer
+              format: int64
+            deleted_at:
+              type: string
+              format: date-time
+              nullable: true
+
+    OvertimeMonthMetaWrite:
+      type: object
+      required: [updated_at]
+      properties:
+        colaborador:
+          type: string
+        cedula:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+    OvertimeMonthMeta:
+      allOf:
+        - $ref: "#/components/schemas/OvertimeMonthMetaWrite"
+        - type: object
+          properties:
+            year_month:
+              type: string
+              example: "2026-08"
+            seq:
+              type: integer
+              format: int64
+            deleted_at:
+              type: string
+              format: date-time
+              nullable: true
+
+    # --- Calendar ---
+    CalendarEventWrite:
+      type: object
+      required: [id, title, date, color, repeat, updated_at]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        date:
+          type: string
+          format: date
+        time:
+          type: string
+        description:
+          type: string
+        color:
+          type: string
+          enum: [indigo, amber, emerald, rose, sky, violet]
+        reminder_minutes:
+          type: integer
+        repeat:
+          type: string
+          enum: [none, daily, weekly, biweekly, monthly, yearly]
+        updated_at:
+          type: string
+          format: date-time
+    CalendarEvent:
+      allOf:
+        - $ref: "#/components/schemas/CalendarEventWrite"
+        - type: object
+          properties:
+            seq:
+              type: integer
+              format: int64
+            deleted_at:
+              type: string
+              format: date-time
+              nullable: true
+
+    # --- Absence ---
+    AbsenceDayWrite:
+      type: object
+      required: [id, date, type, updated_at]
+      properties:
+        id:
+          type: string
+        date:
+          type: string
+          format: date
+        type:
+          type: string
+          enum: [incapacidad, vacaciones, otro]
+        note:
+          type: string
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+    AbsenceDay:
+      allOf:
+        - $ref: "#/components/schemas/AbsenceDayWrite"
+        - type: object
+          properties:
+            seq:
+              type: integer
+              format: int64
+            deleted_at:
+              type: string
+              format: date-time
+              nullable: true
+
+    # --- Daily entries ---
+    DailyEntry:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        content:
+          type: string
+          description: Texto plano derivado del estado CRDT — de solo lectura.
+        content_state:
+          type: string
+          description: Estado CRDT completo (Yjs) en base64 — de solo lectura.
+        seq:
+          type: integer
+          format: int64
+        updated_at:
+          type: string
+          format: date-time
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
