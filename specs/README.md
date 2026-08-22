@@ -44,3 +44,4 @@ tres archivos:
 | Convenciones de código | en diseño | [`convenciones-codigo/`](./convenciones-codigo/requirements.md) |
 | Panel de administración web | implementado | [`panel-admin/`](./panel-admin/requirements.md) |
 | LWW por campo | implementado (sin mergear) | [`lww-por-campo/`](./lww-por-campo/requirements.md) |
+| Web app embebida | implementado (sin mergear) | [`webapp-embebida/`](./webapp-embebida/requirements.md) |

@@ -21,6 +21,7 @@ import (
 	"github.com/jorgebuitragor/logday-server/internal/realtime"
 	"github.com/jorgebuitragor/logday-server/internal/sync"
 	"github.com/jorgebuitragor/logday-server/internal/task"
+	logdayweb "github.com/jorgebuitragor/logday-server/web"
 )
 
 func main() {
@@ -105,6 +106,7 @@ func main() {
 	dailyEntryHandler.Routes(r)
 	syncHandler.Routes(r)
 	realtimeHandler.Routes(r)
+	logdayweb.Routes(r)
 
 	server := &http.Server{
 		Addr:              addr,

@@ -27,16 +27,22 @@ spec-driven development y el detalle de diseño de cada feature.
 
 ## Levantar el servidor
 
-Requiere Docker y Docker Compose.
+Requiere Docker y Docker Compose. El build también compila
+[`logday-web`](https://github.com/jorgebuitragor/logday-web) (repo
+privado, aparte) y lo embebe sirviéndolo en `/app` — como es privado,
+el build lo toma de un checkout local en vez de clonarlo, así que
+necesitás tenerlo clonado como hermano de este repo
+(`../logday-web` relativo a acá).
 
 ```bash
+git clone https://github.com/jorgebuitragor/logday-web.git ../logday-web
 cp .env.example .env
 # editá .env — ver "Variables de entorno" abajo
 docker compose --env-file .env up -d --build
 ```
 
 Confirmá que arrancó: `curl http://localhost:8080/health` debería
-responder `ok`.
+responder `ok`. El cliente web queda en `http://localhost:8080/app`.
 
 ### Variables de entorno
 

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Logday Web — no compilado</title>
+  </head>
+  <body style="font-family: system-ui, sans-serif; padding: 2rem; max-width: 40rem; margin: 0 auto;">
+    <h1>Logday Web no está compilado en esta build</h1>
+    <p>
+      Este es el placeholder que se commitea en <code>web/dist/</code> para
+      que <code>go build</code>/<code>go run</code> local funcione sin
+      necesitar el frontend real (<code>//go:embed dist</code> requiere que
+      el directorio exista y no esté vacío).
+    </p>
+    <p>
+      El build de Docker reemplaza este directorio con el bundle real de
+      <a href="https://github.com/jorgebuitragor/logday-web">logday-web</a>
+      antes de compilar — ver la etapa <code>web-builder</code> en el
+      <code>Dockerfile</code>.
+    </p>
+  </body>
+</html>

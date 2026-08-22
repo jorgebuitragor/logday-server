@@ -1,4 +1,15 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1.4
+
+# --- Web frontend (logday-web, separate private repo) ---
+# Built from a local sibling checkout, not cloned — logday-web is
+# private, so an anonymous `git clone` during the build would fail.
+# Requires the extra build context: see README "Levantar el servidor"
+# for the exact `docker build`/`docker compose` invocation.
+FROM node:22-alpine AS web-builder
+WORKDIR /web-src
+COPY --from=logday-web . .
+RUN npm ci
+RUN npm run build
 
 FROM golang:1.25-alpine AS builder
 
@@ -10,6 +21,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+COPY --from=web-builder /web-src/dist ./web/dist
 
 ENV CGO_ENABLED=1
 RUN go build -trimpath \
