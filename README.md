@@ -133,4 +133,5 @@ make fmt     # golangci-lint fmt ./...
 ```
 
 Ver [`specs/convenciones-codigo/`](./specs/convenciones-codigo/requirements.md)
-para la estructura de paquetes y convenciones de código.
+para la estructura de paquetes y convenciones de código, y
+[`CONTRIBUTING.md`](./CONTRIBUTING.md) para el flujo de ramas (Gitflow).
