@@ -18,11 +18,15 @@ en tiempo real.
 ### Escritura de cambios
 
 - El sistema DEBERÁ exponer endpoints REST por entidad para que un
-  cliente escriba cambios (`POST /<entidad>` para crear/upsert,
-  `PUT /<entidad>/:id` para editar, `DELETE /<entidad>/:id` para
-  soft-delete) — no un endpoint genérico de push por batch. Cada
-  paquete de dominio (`internal/task`, `internal/note`, ...) expone
-  los suyos siguiendo este mismo patrón.
+  cliente escriba cambios (`POST /<entidad>` para crear,
+  `PATCH /<entidad>/:id` para editar campos LWW,
+  `DELETE /<entidad>/:id` para soft-delete) — no un endpoint genérico
+  de push por batch. Cada paquete de dominio (`internal/task`,
+  `internal/note`, ...) expone los suyos siguiendo este mismo patrón.
+  El `PATCH` parcial (en reemplazo del `PUT` de fila completa de v1) y
+  la resolución por campo individual se especifican en
+  [`lww-por-campo/`](../lww-por-campo/requirements.md) — este spec
+  asume ese protocolo, no lo repite.
 - El servidor DEBERÁ asignar `seq` en cada escritura — el cliente
   nunca lo envía ni lo controla, es un concepto puramente del servidor
   (cursor de sync).
@@ -33,13 +37,6 @@ en tiempo real.
   exactamente el riesgo de pérdida silenciosa que se descartó al
   elegir LWW sobre "último que escribe gana" (ver
   `arquitectura-inicial/requirements.md`).
-- Como el cliente manda la fila completa en cada escritura (ver
-  "Resolución de conflictos" en `arquitectura-inicial/requirements.md`
-  para el alcance real de v1 vs. lo aspiracional), estos mismos
-  endpoints son también donde se aplica LWW por fila completa: el
-  servidor DEBERÁ rechazar (409) la escritura entrante si su
-  `updated_at` no es más reciente que el de la fila actualmente
-  almacenada.
 - El riesgo de reloj de dispositivo desincronizado en el cliente que
   determina `updated_at` es un riesgo aceptado explícitamente desde la
   decisión original de usar LWW (ver
