@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/jorgebuitragor/logday-server/internal/auth"
+	"github.com/jorgebuitragor/logday-server/internal/db"
 	"github.com/jorgebuitragor/logday-server/internal/realtime"
 )
 
@@ -32,7 +33,7 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Use(h.auth.RequireAuth)
 
 		r.Post("/calendar-events", h.create)
-		r.Put("/calendar-events/{id}", h.update)
+		r.Patch("/calendar-events/{id}", h.patch)
 		r.Delete("/calendar-events/{id}", h.delete)
 		r.Get("/calendar-events", h.list)
 	})
@@ -97,22 +98,92 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	h.upsert(w, r, &e)
 }
 
-func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
-	userID, _ := auth.UserIDFromContext(r.Context())
+// parseEventPatch reads a PATCH body's raw fields into a Patch.
+func parseEventPatch(raw map[string]json.RawMessage) (Patch, error) {
+	var patch Patch
+	var err error
+	if patch.Title, err = db.PatchField[string](raw, "title"); err != nil {
+		return Patch{}, err
+	}
+	if patch.Date, err = db.PatchField[string](raw, "date"); err != nil {
+		return Patch{}, err
+	}
+	if patch.Time, err = db.PatchField[string](raw, "time"); err != nil {
+		return Patch{}, err
+	}
+	if patch.Description, err = db.PatchField[string](raw, "description"); err != nil {
+		return Patch{}, err
+	}
+	if patch.Color, err = db.PatchField[string](raw, "color"); err != nil {
+		return Patch{}, err
+	}
+	if patch.ReminderMinutes, err = db.PatchField[int](raw, "reminder_minutes"); err != nil {
+		return Patch{}, err
+	}
+	if patch.Repeat, err = db.PatchField[string](raw, "repeat"); err != nil {
+		return Patch{}, err
+	}
+	return patch, nil
+}
 
-	var req eventRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+func validateEventPatch(patch Patch) error {
+	if patch.Title.Set && patch.Title.Value == "" {
+		return errors.New("title cannot be empty")
+	}
+	if patch.Date.Set && patch.Date.Value == "" {
+		return errors.New("date cannot be empty")
+	}
+	if patch.Color.Set && !validColors[patch.Color.Value] {
+		return errors.New("color must be one of: indigo, amber, emerald, rose, sky, violet")
+	}
+	if patch.Repeat.Set && !validRepeats[patch.Repeat.Value] {
+		return errors.New("repeat must be one of: none, daily, weekly, biweekly, monthly, yearly")
+	}
+	return nil
+}
+
+func (h *Handler) patch(w http.ResponseWriter, r *http.Request) {
+	userID, _ := auth.UserIDFromContext(r.Context())
+	id := chi.URLParam(r, "id")
+
+	raw, err := db.ParsePatch(r.Body)
+	if err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	req.ID = chi.URLParam(r, "id")
-	if err := validateEventRequest(req); err != nil {
+
+	updatedAt, err := db.PatchField[time.Time](raw, "updated_at")
+	if err != nil || !updatedAt.Set || updatedAt.Value.IsZero() {
+		http.Error(w, "updated_at is required", http.StatusBadRequest)
+		return
+	}
+
+	patch, err := parseEventPatch(raw)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := validateEventPatch(patch); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	e := req.toEvent(userID)
-	h.upsert(w, r, &e)
+	stored, changed, err := h.store.patchEvent(r.Context(), id, userID, patch, updatedAt.Value)
+	if err != nil {
+		switch {
+		case errors.Is(err, errNotFound):
+			http.Error(w, "calendar event not found", http.StatusNotFound)
+		case errors.Is(err, errForbidden):
+			http.Error(w, "calendar event belongs to another user", http.StatusForbidden)
+		default:
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
+		return
+	}
+	if changed {
+		h.realtime.Notify(stored.UserID, "calendar_event", stored.ID, stored.Seq)
+	}
+	writeJSON(w, http.StatusOK, stored)
 }
 
 func (h *Handler) upsert(w http.ResponseWriter, r *http.Request, e *Event) {

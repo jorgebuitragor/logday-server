@@ -1,6 +1,6 @@
 # LWW por campo — Diseño
 
-Estado: en diseño — no implementado.
+Estado: implementado (`feature/lww-por-campo`, no mergeado a `develop`/`main` todavía).
 
 ## Almacenamiento del timestamp por campo
 

@@ -119,6 +119,95 @@ func (s *store) softDelete(ctx context.Context, id, userID string) (int64, error
 	return seq, nil
 }
 
+// Patch carries the fields present in a PATCH request against an
+// absence day — see specs/lww-por-campo.
+type Patch struct {
+	Date db.Field[string]
+	Type db.Field[string]
+	Note db.Field[*string]
+}
+
+// patchDay merges patch into absence day id field by field, each
+// resolved independently against field_updated_at (LWW per field —
+// see specs/lww-por-campo). Always returns the resulting row, even if
+// every field in patch lost the LWW. changed reports whether anything
+// actually applied.
+func (s *store) patchDay(ctx context.Context, id, userID string, patch Patch, updatedAt time.Time) (d *Day, changed bool, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, user_id, date, type, note, seq, updated_at, deleted_at, field_updated_at
+		FROM absence_days WHERE id = ?
+	`, id)
+	if err != nil {
+		return nil, false, fmt.Errorf("loading absence day for patch: %w", err)
+	}
+	current, fieldUpdatedAtRaw, err := scanDayWithFieldTimestamps(rows)
+	_ = rows.Close()
+	if err != nil {
+		if errors.Is(err, errNotFound) {
+			return nil, false, errNotFound
+		}
+		return nil, false, err
+	}
+	if current.UserID != userID {
+		return nil, false, errForbidden
+	}
+
+	ft, err := db.ParseFieldTimestamps(fieldUpdatedAtRaw)
+	if err != nil {
+		return nil, false, err
+	}
+
+	if patch.Date.Set && ft.Wins("date", updatedAt) {
+		current.Date = patch.Date.Value
+		changed = true
+	}
+	if patch.Type.Set && ft.Wins("type", updatedAt) {
+		current.Type = patch.Type.Value
+		changed = true
+	}
+	if patch.Note.Set && ft.Wins("note", updatedAt) {
+		current.Note = patch.Note.Value
+		changed = true
+	}
+
+	if !changed {
+		return &current, false, nil
+	}
+
+	seq, err := db.NextSeq(ctx, tx, userID)
+	if err != nil {
+		return nil, false, err
+	}
+	current.Seq = seq
+	current.UpdatedAt = time.Now().UTC()
+	current.DeletedAt = nil
+
+	ftEncoded, err := ft.Encode()
+	if err != nil {
+		return nil, false, err
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		UPDATE absence_days SET
+			date = ?, type = ?, note = ?, seq = ?, updated_at = ?, deleted_at = NULL, field_updated_at = ?
+		WHERE id = ?
+	`, current.Date, current.Type, current.Note, current.Seq, formatTime(current.UpdatedAt), ftEncoded, id)
+	if err != nil {
+		return nil, false, fmt.Errorf("patching absence day: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, false, fmt.Errorf("committing absence day patch: %w", err)
+	}
+	return &current, true, nil
+}
+
 func (s *store) listDays(ctx context.Context, userID string) ([]Day, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, user_id, date, type, note, seq, updated_at, deleted_at
@@ -193,6 +282,42 @@ func scanDay(row *sql.Rows) (Day, error) {
 	}
 
 	return d, nil
+}
+
+// scanDayWithFieldTimestamps reads the single row from a query
+// selecting the same columns as scanDay plus a trailing
+// field_updated_at, returning errNotFound if there's no such row —
+// used by patchDay.
+func scanDayWithFieldTimestamps(rows *sql.Rows) (Day, string, error) {
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return Day{}, "", fmt.Errorf("querying absence day: %w", err)
+		}
+		return Day{}, "", errNotFound
+	}
+
+	var d Day
+	var updatedAt, fieldUpdatedAt string
+	var deletedAt sql.NullString
+	if err := rows.Scan(&d.ID, &d.UserID, &d.Date, &d.Type, &d.Note, &d.Seq, &updatedAt, &deletedAt, &fieldUpdatedAt); err != nil {
+		return Day{}, "", fmt.Errorf("scanning absence day: %w", err)
+	}
+
+	updated, err := parseTime(updatedAt)
+	if err != nil {
+		return Day{}, "", err
+	}
+	d.UpdatedAt = updated
+
+	if deletedAt.Valid {
+		dt, err := parseTime(deletedAt.String)
+		if err != nil {
+			return Day{}, "", err
+		}
+		d.DeletedAt = &dt
+	}
+
+	return d, fieldUpdatedAt, nil
 }
 
 func formatTime(t time.Time) string {

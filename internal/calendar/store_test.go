@@ -87,6 +87,90 @@ func TestUpsertEventRejectsCrossUserOwnership(t *testing.T) {
 	}
 }
 
+func TestPatchEventAppliesIndependentFields(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	base := time.Now()
+	if _, err := s.upsertEvent(ctx, sampleEvent("user-1", base)); err != nil {
+		t.Fatalf("initial upsertEvent: %v", err)
+	}
+
+	titlePatch := Patch{Title: db.Field[string]{Set: true, Value: "new title"}}
+	stored, changed, err := s.patchEvent(ctx, "event-1", "user-1", titlePatch, base.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("patchEvent (title): %v", err)
+	}
+	if !changed || stored.Title != "new title" {
+		t.Fatalf("expected title patch to apply, got changed=%v stored=%+v", changed, stored)
+	}
+
+	colorPatch := Patch{Color: db.Field[string]{Set: true, Value: "rose"}}
+	stored, changed, err = s.patchEvent(ctx, "event-1", "user-1", colorPatch, base.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("patchEvent (color): %v", err)
+	}
+	if !changed || stored.Color != "rose" {
+		t.Fatalf("expected color patch to apply, got changed=%v stored=%+v", changed, stored)
+	}
+	if stored.Title != "new title" {
+		t.Fatalf("expected earlier title edit to survive, got %q", stored.Title)
+	}
+}
+
+func TestPatchEventDiscardsStaleFieldSilently(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	base := time.Now()
+	if _, err := s.upsertEvent(ctx, sampleEvent("user-1", base)); err != nil {
+		t.Fatalf("initial upsertEvent: %v", err)
+	}
+
+	winner := Patch{Title: db.Field[string]{Set: true, Value: "winner"}}
+	if _, _, err := s.patchEvent(ctx, "event-1", "user-1", winner, base.Add(2*time.Minute)); err != nil {
+		t.Fatalf("patchEvent (winner): %v", err)
+	}
+
+	loser := Patch{Title: db.Field[string]{Set: true, Value: "loser"}}
+	stored, changed, err := s.patchEvent(ctx, "event-1", "user-1", loser, base.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("patchEvent (loser): %v", err)
+	}
+	if changed {
+		t.Fatalf("expected no change from a stale field write")
+	}
+	if stored.Title != "winner" {
+		t.Fatalf("expected winner's title to survive, got %q", stored.Title)
+	}
+}
+
+func TestPatchEventRejectsCrossUserOwnership(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if _, err := s.upsertEvent(ctx, sampleEvent("user-1", time.Now())); err != nil {
+		t.Fatalf("initial upsertEvent: %v", err)
+	}
+
+	patch := Patch{Title: db.Field[string]{Set: true, Value: "hijacked"}}
+	_, _, err := s.patchEvent(ctx, "event-1", "user-2", patch, time.Now())
+	if !errors.Is(err, errForbidden) {
+		t.Fatalf("expected errForbidden, got %v", err)
+	}
+}
+
+func TestPatchEventNotFound(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	patch := Patch{Title: db.Field[string]{Set: true, Value: "x"}}
+	_, _, err := s.patchEvent(ctx, "does-not-exist", "user-1", patch, time.Now())
+	if !errors.Is(err, errNotFound) {
+		t.Fatalf("expected errNotFound, got %v", err)
+	}
+}
+
 func TestSoftDeleteEventRemovesFromListAndChecksOwnership(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

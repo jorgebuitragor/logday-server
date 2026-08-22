@@ -1,6 +1,6 @@
 # LWW por campo — Requirements
 
-Estado: en diseño
+Estado: implementado (`feature/lww-por-campo`, no mergeado a `develop`/`main` todavía)
 
 ## Contexto
 

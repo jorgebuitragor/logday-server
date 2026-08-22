@@ -137,6 +137,145 @@ func (s *store) softDeleteEntry(ctx context.Context, id, userID string) (int64, 
 	return seq, nil
 }
 
+// EntryPatch carries the fields present in a PATCH request against an
+// overtime entry — see specs/lww-por-campo.
+type EntryPatch struct {
+	Fecha                   db.Field[string]
+	SolicitadaPor           db.Field[string]
+	Actividad               db.Field[string]
+	Observaciones           db.Field[string]
+	HoraInicio              db.Field[string]
+	HoraFinal               db.Field[string]
+	TotalHoras              db.Field[float64]
+	ExtrasDiurnas           db.Field[float64]
+	ExtrasNocturnas         db.Field[float64]
+	ExtrasDiurnasFestivas   db.Field[float64]
+	ExtrasNocturnasFestivas db.Field[float64]
+}
+
+// patchEntry merges patch into overtime entry id field by field,
+// each resolved independently against field_updated_at (LWW per
+// field — see specs/lww-por-campo). Always returns the resulting row,
+// even if every field in patch lost the LWW. changed reports whether
+// anything actually applied.
+func (s *store) patchEntry(ctx context.Context, id, userID string, patch EntryPatch, updatedAt time.Time) (e *Entry, changed bool, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, user_id, fecha, solicitada_por, actividad, observaciones,
+			hora_inicio, hora_final, total_horas, extras_diurnas, extras_nocturnas,
+			extras_diurnas_festivas, extras_nocturnas_festivas, seq, updated_at, deleted_at, field_updated_at
+		FROM overtime_entries WHERE id = ?
+	`, id)
+	if err != nil {
+		return nil, false, fmt.Errorf("loading overtime entry for patch: %w", err)
+	}
+	current, fieldUpdatedAtRaw, err := scanEntryWithFieldTimestamps(rows)
+	_ = rows.Close()
+	if err != nil {
+		if errors.Is(err, errNotFound) {
+			return nil, false, errNotFound
+		}
+		return nil, false, err
+	}
+	if current.UserID != userID {
+		return nil, false, errForbidden
+	}
+
+	ft, err := db.ParseFieldTimestamps(fieldUpdatedAtRaw)
+	if err != nil {
+		return nil, false, err
+	}
+
+	if patch.Fecha.Set && ft.Wins("fecha", updatedAt) {
+		current.Fecha = patch.Fecha.Value
+		changed = true
+	}
+	if patch.SolicitadaPor.Set && ft.Wins("solicitada_por", updatedAt) {
+		current.SolicitadaPor = patch.SolicitadaPor.Value
+		changed = true
+	}
+	if patch.Actividad.Set && ft.Wins("actividad", updatedAt) {
+		current.Actividad = patch.Actividad.Value
+		changed = true
+	}
+	if patch.Observaciones.Set && ft.Wins("observaciones", updatedAt) {
+		current.Observaciones = patch.Observaciones.Value
+		changed = true
+	}
+	if patch.HoraInicio.Set && ft.Wins("hora_inicio", updatedAt) {
+		current.HoraInicio = patch.HoraInicio.Value
+		changed = true
+	}
+	if patch.HoraFinal.Set && ft.Wins("hora_final", updatedAt) {
+		current.HoraFinal = patch.HoraFinal.Value
+		changed = true
+	}
+	if patch.TotalHoras.Set && ft.Wins("total_horas", updatedAt) {
+		current.TotalHoras = patch.TotalHoras.Value
+		changed = true
+	}
+	if patch.ExtrasDiurnas.Set && ft.Wins("extras_diurnas", updatedAt) {
+		current.ExtrasDiurnas = patch.ExtrasDiurnas.Value
+		changed = true
+	}
+	if patch.ExtrasNocturnas.Set && ft.Wins("extras_nocturnas", updatedAt) {
+		current.ExtrasNocturnas = patch.ExtrasNocturnas.Value
+		changed = true
+	}
+	if patch.ExtrasDiurnasFestivas.Set && ft.Wins("extras_diurnas_festivas", updatedAt) {
+		current.ExtrasDiurnasFestivas = patch.ExtrasDiurnasFestivas.Value
+		changed = true
+	}
+	if patch.ExtrasNocturnasFestivas.Set && ft.Wins("extras_nocturnas_festivas", updatedAt) {
+		current.ExtrasNocturnasFestivas = patch.ExtrasNocturnasFestivas.Value
+		changed = true
+	}
+
+	if !changed {
+		return &current, false, nil
+	}
+
+	seq, err := db.NextSeq(ctx, tx, userID)
+	if err != nil {
+		return nil, false, err
+	}
+	current.Seq = seq
+	current.UpdatedAt = time.Now().UTC()
+	current.DeletedAt = nil
+
+	ftEncoded, err := ft.Encode()
+	if err != nil {
+		return nil, false, err
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		UPDATE overtime_entries SET
+			fecha = ?, solicitada_por = ?, actividad = ?, observaciones = ?,
+			hora_inicio = ?, hora_final = ?, total_horas = ?, extras_diurnas = ?,
+			extras_nocturnas = ?, extras_diurnas_festivas = ?, extras_nocturnas_festivas = ?,
+			seq = ?, updated_at = ?, deleted_at = NULL, field_updated_at = ?
+		WHERE id = ?
+	`,
+		current.Fecha, current.SolicitadaPor, current.Actividad, current.Observaciones,
+		current.HoraInicio, current.HoraFinal, current.TotalHoras, current.ExtrasDiurnas,
+		current.ExtrasNocturnas, current.ExtrasDiurnasFestivas, current.ExtrasNocturnasFestivas,
+		current.Seq, formatTime(current.UpdatedAt), ftEncoded, id,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("patching overtime entry: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, false, fmt.Errorf("committing overtime entry patch: %w", err)
+	}
+	return &current, true, nil
+}
+
 func (s *store) listEntries(ctx context.Context, userID string) ([]Entry, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, user_id, fecha, solicitada_por, actividad, observaciones,
@@ -223,59 +362,97 @@ func scanEntry(row *sql.Rows) (Entry, error) {
 
 // --- MonthMeta ---
 
-func (s *store) upsertMonthMeta(ctx context.Context, m *MonthMeta) (*MonthMeta, error) {
+// MonthMetaPatch carries the fields present in a PATCH request
+// against a month's metadata — see specs/lww-por-campo.
+type MonthMetaPatch struct {
+	Colaborador db.Field[string]
+	Cedula      db.Field[string]
+}
+
+// patchMonthMeta merges patch into the (userID, yearMonth) row field
+// by field, each resolved independently against field_updated_at (LWW
+// per field — see specs/lww-por-campo). Always returns the resulting
+// row, even if every field in patch lost the LWW. changed reports
+// whether anything actually applied.
+func (s *store) patchMonthMeta(ctx context.Context, userID, yearMonth string, patch MonthMetaPatch, updatedAt time.Time) (m *MonthMeta, changed bool, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("beginning transaction: %w", err)
+		return nil, false, fmt.Errorf("beginning transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var existingUpdatedAt string
-	err = tx.QueryRowContext(ctx,
-		`SELECT updated_at FROM overtime_month_meta WHERE user_id = ? AND year_month = ?`,
-		m.UserID, m.YearMonth,
-	).Scan(&existingUpdatedAt)
+	rows, err := tx.QueryContext(ctx, `
+		SELECT user_id, year_month, colaborador, cedula, seq, updated_at, deleted_at, field_updated_at
+		FROM overtime_month_meta WHERE user_id = ? AND year_month = ?
+	`, userID, yearMonth)
+	if err != nil {
+		return nil, false, fmt.Errorf("loading overtime month meta for patch: %w", err)
+	}
+	current, fieldUpdatedAtRaw, err := scanMonthMetaWithFieldTimestamps(rows)
+	_ = rows.Close()
 	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		// New row, nothing to check. Ownership isn't a separate check
-		// here (unlike Entry): the row is keyed by user_id itself, so
-		// there's no cross-user id collision to guard against.
+	case errors.Is(err, errNotFound):
+		// overtime_month_meta has no POST (natural key, no client-
+		// generated id — see specs/esquema-datos) — PATCH is its only
+		// write endpoint, so it doubles as "create if missing", same as
+		// the PUT it replaces. An empty field_updated_at means any
+		// timestamp in patch wins unconditionally below.
+		current = MonthMeta{UserID: userID, YearMonth: yearMonth}
+		fieldUpdatedAtRaw = "{}"
 	case err != nil:
-		return nil, fmt.Errorf("checking existing overtime month meta: %w", err)
-	default:
-		existing, perr := parseTime(existingUpdatedAt)
-		if perr != nil {
-			return nil, perr
-		}
-		if !m.UpdatedAt.After(existing) {
-			return nil, errConflict
-		}
+		return nil, false, err
 	}
 
-	seq, err := db.NextSeq(ctx, tx, m.UserID)
+	ft, err := db.ParseFieldTimestamps(fieldUpdatedAtRaw)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	m.Seq = seq
+
+	if patch.Colaborador.Set && ft.Wins("colaborador", updatedAt) {
+		current.Colaborador = patch.Colaborador.Value
+		changed = true
+	}
+	if patch.Cedula.Set && ft.Wins("cedula", updatedAt) {
+		current.Cedula = patch.Cedula.Value
+		changed = true
+	}
+
+	if !changed {
+		return &current, false, nil
+	}
+
+	seq, err := db.NextSeq(ctx, tx, userID)
+	if err != nil {
+		return nil, false, err
+	}
+	current.Seq = seq
+	current.UpdatedAt = time.Now().UTC()
+	current.DeletedAt = nil
+
+	ftEncoded, err := ft.Encode()
+	if err != nil {
+		return nil, false, err
+	}
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO overtime_month_meta (user_id, year_month, colaborador, cedula, seq, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO overtime_month_meta (user_id, year_month, colaborador, cedula, seq, updated_at, field_updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(user_id, year_month) DO UPDATE SET
 			colaborador = excluded.colaborador,
 			cedula = excluded.cedula,
 			seq = excluded.seq,
 			updated_at = excluded.updated_at,
-			deleted_at = NULL
-	`, m.UserID, m.YearMonth, m.Colaborador, m.Cedula, m.Seq, formatTime(m.UpdatedAt))
+			deleted_at = NULL,
+			field_updated_at = excluded.field_updated_at
+	`, userID, yearMonth, current.Colaborador, current.Cedula, current.Seq, formatTime(current.UpdatedAt), ftEncoded)
 	if err != nil {
-		return nil, fmt.Errorf("upserting overtime month meta: %w", err)
+		return nil, false, fmt.Errorf("patching overtime month meta: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("committing overtime month meta upsert: %w", err)
+		return nil, false, fmt.Errorf("committing overtime month meta patch: %w", err)
 	}
-	return m, nil
+	return &current, true, nil
 }
 
 func (s *store) softDeleteMonthMeta(ctx context.Context, userID, yearMonth string) (int64, error) {
@@ -390,6 +567,82 @@ func scanMonthMeta(row *sql.Rows) (MonthMeta, error) {
 	}
 
 	return m, nil
+}
+
+// scanEntryWithFieldTimestamps reads the single row from a query
+// selecting the same columns as scanEntry plus a trailing
+// field_updated_at, returning errNotFound if there's no such row —
+// used by patchEntry.
+func scanEntryWithFieldTimestamps(rows *sql.Rows) (Entry, string, error) {
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return Entry{}, "", fmt.Errorf("querying overtime entry: %w", err)
+		}
+		return Entry{}, "", errNotFound
+	}
+
+	var e Entry
+	var updatedAt, fieldUpdatedAt string
+	var deletedAt sql.NullString
+	if err := rows.Scan(
+		&e.ID, &e.UserID, &e.Fecha, &e.SolicitadaPor, &e.Actividad, &e.Observaciones,
+		&e.HoraInicio, &e.HoraFinal, &e.TotalHoras, &e.ExtrasDiurnas, &e.ExtrasNocturnas,
+		&e.ExtrasDiurnasFestivas, &e.ExtrasNocturnasFestivas, &e.Seq, &updatedAt, &deletedAt, &fieldUpdatedAt,
+	); err != nil {
+		return Entry{}, "", fmt.Errorf("scanning overtime entry: %w", err)
+	}
+
+	updated, err := parseTime(updatedAt)
+	if err != nil {
+		return Entry{}, "", err
+	}
+	e.UpdatedAt = updated
+
+	if deletedAt.Valid {
+		d, err := parseTime(deletedAt.String)
+		if err != nil {
+			return Entry{}, "", err
+		}
+		e.DeletedAt = &d
+	}
+
+	return e, fieldUpdatedAt, nil
+}
+
+// scanMonthMetaWithFieldTimestamps reads the single row from a query
+// selecting the same columns as scanMonthMeta plus a trailing
+// field_updated_at, returning errNotFound if there's no such row —
+// used by patchMonthMeta.
+func scanMonthMetaWithFieldTimestamps(rows *sql.Rows) (MonthMeta, string, error) {
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return MonthMeta{}, "", fmt.Errorf("querying overtime month meta: %w", err)
+		}
+		return MonthMeta{}, "", errNotFound
+	}
+
+	var m MonthMeta
+	var updatedAt, fieldUpdatedAt string
+	var deletedAt sql.NullString
+	if err := rows.Scan(&m.UserID, &m.YearMonth, &m.Colaborador, &m.Cedula, &m.Seq, &updatedAt, &deletedAt, &fieldUpdatedAt); err != nil {
+		return MonthMeta{}, "", fmt.Errorf("scanning overtime month meta: %w", err)
+	}
+
+	updated, err := parseTime(updatedAt)
+	if err != nil {
+		return MonthMeta{}, "", err
+	}
+	m.UpdatedAt = updated
+
+	if deletedAt.Valid {
+		d, err := parseTime(deletedAt.String)
+		if err != nil {
+			return MonthMeta{}, "", err
+		}
+		m.DeletedAt = &d
+	}
+
+	return m, fieldUpdatedAt, nil
 }
 
 func formatTime(t time.Time) string {
