@@ -90,12 +90,13 @@ Estado: implementado (`feature/lww-por-campo`, no mergeado a `develop`/`main` to
 
 - [x] `go build` / `go test ./...` / `golangci-lint run ./...` en
       verde (0 issues).
-- [x] Validación manual end-to-end: dos "dispositivos" (curl)
-      editando `status` y `title` de la misma task sin verse — ambos
-      sobreviven, confirmado vía `GET /tasks` y `GET /sync/changes`.
-      Un `PATCH` con timestamp viejo llegando después responde 200 (no
-      409) y no pisa el valor ganador. `PATCH /overtime-month-meta/:ym`
-      crea la fila en su primer uso. Docker no estaba disponible en
-      la máquina de desarrollo — se corrió el mismo binario vía
-      `go run` con una base de datos limpia en su lugar; validar contra
-      el contenedor real queda pendiente antes de mergear a `main`.
+- [x] Validación manual end-to-end contra contenedor Docker real
+      (`docker compose --env-file .env up -d --build`, imagen
+      multi-stage, migraciones + bootstrap de admin corriendo dentro
+      del contenedor): dos "dispositivos" (curl) editando `status` y
+      `title` de la misma task sin verse — ambos sobreviven, confirmado
+      vía `GET /tasks` y `GET /sync/changes`. Un `PATCH` con timestamp
+      viejo llegando después responde 200 (no 409) y no pisa el valor
+      ganador. `PATCH /overtime-month-meta/:ym` crea la fila en su
+      primer uso, sin `POST`. Contenedor y volumen destruidos al
+      terminar (`docker compose down -v`).
