@@ -40,17 +40,27 @@ info:
     4. Para escribir: usa el endpoint REST del recurso (no hay escritura vía
        `/sync/changes`, que es sólo de lectura).
 
-    La mayoría de los recursos usan **Last-Write-Wins por fila completa**:
-    el servidor rechaza con `409 Conflict` un `POST`/`PUT` cuyo `updated_at`
-    no sea estrictamente posterior al ya guardado. El contenido de notas
-    (`notes.content`) y de entradas diarias (`daily-entries`) es CRDT
-    (compatible con Yjs) y en cambio **nunca rechaza por antigüedad**: los
-    updates se mergean siempre, vía su propio endpoint de contenido en base64.
+    La mayoría de los recursos separan creación y edición: `POST` crea con la
+    fila completa y usa **Last-Write-Wins por fila** — rechaza con
+    `409 Conflict` si `updated_at` no es estrictamente posterior al ya
+    guardado. `PATCH` edita campos puntuales de una fila existente y usa
+    **Last-Write-Wins por campo** (ver `specs/lww-por-campo`): cada campo
+    presente en el body se resuelve contra su propio timestamp de última
+    escritura, así que dos ediciones concurrentes a campos distintos de la
+    misma fila sobreviven ambas — nunca responde `409`, si un campo pierde
+    el LWW simplemente se descarta en silencio y el resto se aplica igual.
+    El cliente debe sobreescribir su estado local con la fila completa que
+    devuelve cualquier `PATCH`, sin excepción — es la única regla de
+    reconciliación que necesita, tanto si su escritura ganó como si perdió.
+    El contenido de notas (`notes.content`) y de entradas diarias
+    (`daily-entries`) es CRDT (compatible con Yjs) y en cambio **nunca
+    rechaza por antigüedad**: los updates se mergean siempre, vía su propio
+    endpoint de contenido en base64.
 
     Casi todos los IDs de recursos son generados por el cliente (UUID
-    recomendado) y viajan en el body en `POST` o en la URL en `PUT` — no los
-    asigna el servidor, porque el cliente los necesita para funcionar
-    offline-first antes de sincronizar.
+    recomendado) y viajan en el body en `POST` o en la URL en `PATCH`/`PUT`
+    — no los asigna el servidor, porque el cliente los necesita para
+    funcionar offline-first antes de sincronizar.
 
     ## Formato de errores
 
@@ -396,9 +406,11 @@ paths:
       summary: Crea o actualiza una task (upsert por `id` del body)
       description: |
         El `id` va en el body y es generado por el cliente. Si ya existe una
-        task con ese `id` del mismo usuario, este endpoint la actualiza igual
-        que `PUT /tasks/{id}` (upsert con chequeo LWW) — no hay una distinción
-        real entre "crear" y "actualizar" salvo de dónde viene el `id`.
+        task con ese `id` del mismo usuario, este endpoint la reemplaza entera
+        (upsert con chequeo LWW por fila completa) — pensado para creación;
+        para editar campos puntuales de una task existente usar
+        `PATCH /tasks/{id}` en su lugar (LWW por campo, ver
+        `specs/lww-por-campo`).
       requestBody:
         required: true
         content:
@@ -432,10 +444,19 @@ paths:
                 example: a newer version of this task already exists
 
   /tasks/{id}:
-    put:
-      operationId: upsertTaskById
+    patch:
+      operationId: patchTask
       tags: [Tasks]
-      summary: Crea o actualiza una task (upsert por `id` de la URL)
+      summary: Edita campos puntuales de una task existente (LWW por campo)
+      description: |
+        Solo los campos presentes en el body se evalúan para escritura; cada
+        uno se resuelve de forma independiente contra su propio timestamp de
+        última escritura (LWW por campo, no por fila — ver
+        `specs/lww-por-campo`). Nunca responde `409`: si algún campo pierde el
+        LWW se descarta en silencio y el resto se aplica igual. La respuesta
+        siempre es la fila completa ya resuelta — el cliente debe
+        sobreescribir su estado local con ella sin excepción, sea que su
+        escritura haya ganado, perdido, o quedado parcialmente aplicada.
       parameters:
         - $ref: "#/components/parameters/ResourceId"
       requestBody:
@@ -443,10 +464,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/TaskWrite"
+              $ref: "#/components/schemas/TaskPatch"
       responses:
         "200":
-          description: Task creada o actualizada.
+          description: Estado actual de la task tras aplicar los campos que ganaron el LWW (puede ser idéntico al anterior si todos perdieron).
           content:
             application/json:
               schema:
@@ -459,10 +480,8 @@ paths:
           description: La task pertenece a otro usuario.
           content:
             text/plain: { schema: { type: string } }
-        "409":
-          description: Conflicto LWW — ya existe una versión más nueva.
-          content:
-            text/plain: { schema: { type: string } }
+        "404":
+          $ref: "#/components/responses/NotFound"
     delete:
       operationId: deleteTask
       tags: [Tasks]
@@ -533,10 +552,15 @@ paths:
             text/plain: { schema: { type: string } }
 
   /notes/{id}:
-    put:
-      operationId: upsertNoteById
+    patch:
+      operationId: patchNote
       tags: [Notes]
-      summary: Crea o actualiza los metadatos de una nota (upsert por `id` de la URL)
+      summary: Edita campos puntuales de los metadatos de una nota (LWW por campo)
+      description: |
+        Mismo protocolo que `PATCH /tasks/{id}` (ver `specs/lww-por-campo`):
+        solo los campos presentes se evalúan, cada uno se resuelve por su
+        propio timestamp, nunca responde `409`. Nunca toca el contenido — eso
+        sigue siendo exclusivo de `POST /notes/{id}/content`.
       parameters:
         - $ref: "#/components/parameters/ResourceId"
       requestBody:
@@ -544,10 +568,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/NoteWrite"
+              $ref: "#/components/schemas/NotePatch"
       responses:
         "200":
-          description: Nota creada o actualizada.
+          description: Estado actual de la nota tras aplicar los campos que ganaron el LWW.
           content:
             application/json:
               schema:
@@ -560,10 +584,8 @@ paths:
           description: La nota pertenece a otro usuario.
           content:
             text/plain: { schema: { type: string } }
-        "409":
-          description: Conflicto LWW en los metadatos.
-          content:
-            text/plain: { schema: { type: string } }
+        "404":
+          $ref: "#/components/responses/NotFound"
     delete:
       operationId: deleteNote
       tags: [Notes]
@@ -588,7 +610,7 @@ paths:
       tags: [Notes]
       summary: Mergea un update CRDT del contenido de la nota
       description: |
-        A diferencia de `PUT /notes/{id}`, esto **nunca rechaza por
+        A diferencia de `PATCH /notes/{id}`, esto **nunca rechaza por
         antigüedad**: los updates CRDT conmutan y son idempotentes, así que
         siempre se aplican y mergean con el estado guardado, sin importar el
         orden de llegada entre dispositivos. `content_update` es un update
@@ -668,10 +690,11 @@ paths:
             text/plain: { schema: { type: string } }
 
   /overtime-entries/{id}:
-    put:
-      operationId: upsertOvertimeEntryById
+    patch:
+      operationId: patchOvertimeEntry
       tags: [Overtime]
-      summary: Crea o actualiza una entrada (upsert por `id` de la URL)
+      summary: Edita campos puntuales de una entrada (LWW por campo)
+      description: Mismo protocolo que `PATCH /tasks/{id}` (ver `specs/lww-por-campo`) — solo los campos presentes se evalúan, cada uno por su propio timestamp, nunca responde `409`.
       parameters:
         - $ref: "#/components/parameters/ResourceId"
       requestBody:
@@ -679,10 +702,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/OvertimeEntryWrite"
+              $ref: "#/components/schemas/OvertimeEntryPatch"
       responses:
         "200":
-          description: Entrada creada o actualizada.
+          description: Estado actual de la entrada tras aplicar los campos que ganaron el LWW.
           content:
             application/json:
               schema:
@@ -695,10 +718,8 @@ paths:
           description: La entrada pertenece a otro usuario.
           content:
             text/plain: { schema: { type: string } }
-        "409":
-          description: Conflicto LWW.
-          content:
-            text/plain: { schema: { type: string } }
+        "404":
+          $ref: "#/components/responses/NotFound"
     delete:
       operationId: deleteOvertimeEntry
       tags: [Overtime]
@@ -735,11 +756,17 @@ paths:
           $ref: "#/components/responses/Unauthorized"
 
   /overtime-month-meta/{yearMonth}:
-    put:
-      operationId: upsertOvertimeMonthMeta
+    patch:
+      operationId: patchOvertimeMonthMeta
       tags: [Overtime]
-      summary: Crea o actualiza los metadatos de un mes
-      description: No hay `id` propio — la clave natural es `(user_id, year_month)`, y `yearMonth` en la URL cumple ese rol tanto en la escritura como en `/sync/changes`.
+      summary: Crea o edita los metadatos de un mes (LWW por campo)
+      description: |
+        No hay `id` propio ni `POST` — la clave natural es `(user_id,
+        year_month)`, y `yearMonth` en la URL cumple ese rol tanto en la
+        escritura como en `/sync/changes`. Por eso este `PATCH` también crea
+        el registro si `yearMonth` no existía todavía (mismo comportamiento
+        que el `PUT` que reemplaza). Campos presentes se evalúan por su
+        propio timestamp (ver `specs/lww-por-campo`); nunca responde `409`.
       parameters:
         - name: yearMonth
           in: path
@@ -756,7 +783,7 @@ paths:
               $ref: "#/components/schemas/OvertimeMonthMetaWrite"
       responses:
         "200":
-          description: Metadatos creados o actualizados.
+          description: Estado actual de los metadatos del mes tras aplicar los campos que ganaron el LWW.
           content:
             application/json:
               schema:
@@ -765,10 +792,6 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
-        "409":
-          description: Conflicto LWW.
-          content:
-            text/plain: { schema: { type: string } }
     delete:
       operationId: deleteOvertimeMonthMeta
       tags: [Overtime]
@@ -835,10 +858,11 @@ paths:
             text/plain: { schema: { type: string } }
 
   /calendar-events/{id}:
-    put:
-      operationId: upsertCalendarEventById
+    patch:
+      operationId: patchCalendarEvent
       tags: [Calendar]
-      summary: Crea o actualiza un evento (upsert por `id` de la URL)
+      summary: Edita campos puntuales de un evento (LWW por campo)
+      description: Mismo protocolo que `PATCH /tasks/{id}` (ver `specs/lww-por-campo`) — solo los campos presentes se evalúan, cada uno por su propio timestamp, nunca responde `409`.
       parameters:
         - $ref: "#/components/parameters/ResourceId"
       requestBody:
@@ -846,10 +870,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CalendarEventWrite"
+              $ref: "#/components/schemas/CalendarEventPatch"
       responses:
         "200":
-          description: Evento creado o actualizado.
+          description: Estado actual del evento tras aplicar los campos que ganaron el LWW.
           content:
             application/json:
               schema:
@@ -862,10 +886,8 @@ paths:
           description: El evento pertenece a otro usuario.
           content:
             text/plain: { schema: { type: string } }
-        "409":
-          description: Conflicto LWW.
-          content:
-            text/plain: { schema: { type: string } }
+        "404":
+          $ref: "#/components/responses/NotFound"
     delete:
       operationId: deleteCalendarEvent
       tags: [Calendar]
@@ -931,10 +953,11 @@ paths:
             text/plain: { schema: { type: string } }
 
   /absence-days/{id}:
-    put:
-      operationId: upsertAbsenceDayById
+    patch:
+      operationId: patchAbsenceDay
       tags: [Absence]
-      summary: Crea o actualiza un día de ausencia (upsert por `id` de la URL)
+      summary: Edita campos puntuales de un día de ausencia (LWW por campo)
+      description: Mismo protocolo que `PATCH /tasks/{id}` (ver `specs/lww-por-campo`) — solo los campos presentes se evalúan, cada uno por su propio timestamp, nunca responde `409`.
       parameters:
         - $ref: "#/components/parameters/ResourceId"
       requestBody:
@@ -942,10 +965,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AbsenceDayWrite"
+              $ref: "#/components/schemas/AbsenceDayPatch"
       responses:
         "200":
-          description: Día creado o actualizado.
+          description: Estado actual del día tras aplicar los campos que ganaron el LWW.
           content:
             application/json:
               schema:
@@ -958,10 +981,8 @@ paths:
           description: El día pertenece a otro usuario.
           content:
             text/plain: { schema: { type: string } }
-        "409":
-          description: Conflicto LWW.
-          content:
-            text/plain: { schema: { type: string } }
+        "404":
+          $ref: "#/components/responses/NotFound"
     delete:
       operationId: deleteAbsenceDay
       tags: [Absence]
@@ -1260,6 +1281,43 @@ components:
               type: string
               format: date-time
               nullable: true
+    TaskPatch:
+      type: object
+      required: [updated_at]
+      description: |
+        Todos los campos son opcionales salvo `updated_at` — solo los
+        presentes se evalúan para escritura (ver `PATCH /tasks/{id}`). Un
+        campo nullable enviado explícitamente como `null` lo limpia; un campo
+        ausente del body no se toca.
+      properties:
+        title:
+          type: string
+        task_code:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [todo, in-progress, done]
+        tags:
+          type: array
+          items:
+            type: string
+        project:
+          type: string
+        created:
+          type: string
+        completed_at:
+          type: string
+          nullable: true
+        due:
+          type: string
+          nullable: true
+        content:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+          description: Momento real de esta edición local — se compara por campo, no por fila.
 
     # --- Notes ---
     NoteWrite:
@@ -1303,6 +1361,28 @@ components:
               type: string
               format: date-time
               nullable: true
+    NotePatch:
+      type: object
+      required: [updated_at]
+      description: Todos los campos son opcionales salvo `updated_at` (ver `PATCH /notes/{id}`). No incluye contenido — eso es `ContentUpdateRequest`.
+      properties:
+        title:
+          type: string
+        folder:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        created:
+          type: string
+        updated:
+          type: string
+        pinned:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
 
     ContentUpdateRequest:
       type: object
@@ -1366,6 +1446,42 @@ components:
               type: string
               format: date-time
               nullable: true
+    OvertimeEntryPatch:
+      type: object
+      required: [updated_at]
+      description: Todos los campos son opcionales salvo `updated_at` (ver `PATCH /overtime-entries/{id}`).
+      properties:
+        fecha:
+          type: string
+          format: date
+        solicitada_por:
+          type: string
+        actividad:
+          type: string
+        observaciones:
+          type: string
+        hora_inicio:
+          type: string
+        hora_final:
+          type: string
+        total_horas:
+          type: number
+          format: double
+        extras_diurnas:
+          type: number
+          format: double
+        extras_nocturnas:
+          type: number
+          format: double
+        extras_diurnas_festivas:
+          type: number
+          format: double
+        extras_nocturnas_festivas:
+          type: number
+          format: double
+        updated_at:
+          type: string
+          format: date-time
 
     OvertimeMonthMetaWrite:
       type: object
@@ -1433,6 +1549,31 @@ components:
               type: string
               format: date-time
               nullable: true
+    CalendarEventPatch:
+      type: object
+      required: [updated_at]
+      description: Todos los campos son opcionales salvo `updated_at` (ver `PATCH /calendar-events/{id}`).
+      properties:
+        title:
+          type: string
+        date:
+          type: string
+          format: date
+        time:
+          type: string
+        description:
+          type: string
+        color:
+          type: string
+          enum: [indigo, amber, emerald, rose, sky, violet]
+        reminder_minutes:
+          type: integer
+        repeat:
+          type: string
+          enum: [none, daily, weekly, biweekly, monthly, yearly]
+        updated_at:
+          type: string
+          format: date-time
 
     # --- Absence ---
     AbsenceDayWrite:
@@ -1465,6 +1606,23 @@ components:
               type: string
               format: date-time
               nullable: true
+    AbsenceDayPatch:
+      type: object
+      required: [updated_at]
+      description: Todos los campos son opcionales salvo `updated_at` (ver `PATCH /absence-days/{id}`). `note` enviado como `null` explícito lo limpia.
+      properties:
+        date:
+          type: string
+          format: date
+        type:
+          type: string
+          enum: [incapacidad, vacaciones, otro]
+        note:
+          type: string
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
 
     # --- Daily entries ---
     DailyEntry:

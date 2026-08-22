@@ -156,6 +156,127 @@ func (s *store) applyContentUpdate(ctx context.Context, id, userID string, updat
 	return s.getNote(ctx, id)
 }
 
+// Patch carries the fields present in a PATCH request against note
+// metadata — see specs/lww-por-campo. content_crdt is never part of
+// this: it's written exclusively through applyContentUpdate.
+type Patch struct {
+	Title   db.Field[string]
+	Folder  db.Field[string]
+	Tags    db.Field[[]string]
+	Created db.Field[string]
+	Updated db.Field[string]
+	Pinned  db.Field[bool]
+}
+
+// patchNote merges patch into note id's metadata fields, each resolved
+// independently against field_updated_at (LWW per field — see
+// specs/lww-por-campo). Always returns the resulting row, even if
+// every field in patch lost the LWW. changed reports whether anything
+// actually applied.
+func (s *store) patchNote(ctx context.Context, id, userID string, patch Patch, updatedAt time.Time) (n *Note, changed bool, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, user_id, title, folder, tags, created, updated, pinned, content_crdt, seq, updated_at, deleted_at, field_updated_at
+		FROM notes WHERE id = ?
+	`, id)
+	if err != nil {
+		return nil, false, fmt.Errorf("loading note for patch: %w", err)
+	}
+	current, fieldUpdatedAtRaw, err := scanNoteWithFieldTimestamps(rows)
+	_ = rows.Close()
+	if err != nil {
+		if errors.Is(err, errNotFound) {
+			return nil, false, errNotFound
+		}
+		return nil, false, err
+	}
+	if current.UserID != userID {
+		return nil, false, errForbidden
+	}
+
+	ft, err := db.ParseFieldTimestamps(fieldUpdatedAtRaw)
+	if err != nil {
+		return nil, false, err
+	}
+
+	if patch.Title.Set && ft.Wins("title", updatedAt) {
+		current.Title = patch.Title.Value
+		changed = true
+	}
+	if patch.Folder.Set && ft.Wins("folder", updatedAt) {
+		current.Folder = patch.Folder.Value
+		changed = true
+	}
+	if patch.Tags.Set && ft.Wins("tags", updatedAt) {
+		tags := patch.Tags.Value
+		if tags == nil {
+			tags = []string{}
+		}
+		current.Tags = tags
+		changed = true
+	}
+	if patch.Created.Set && ft.Wins("created", updatedAt) {
+		current.Created = patch.Created.Value
+		changed = true
+	}
+	if patch.Updated.Set && ft.Wins("updated", updatedAt) {
+		current.Updated = patch.Updated.Value
+		changed = true
+	}
+	if patch.Pinned.Set && ft.Wins("pinned", updatedAt) {
+		current.Pinned = patch.Pinned.Value
+		changed = true
+	}
+
+	if !changed {
+		return &current, false, nil
+	}
+
+	seq, err := db.NextSeq(ctx, tx, userID)
+	if err != nil {
+		return nil, false, err
+	}
+	current.Seq = seq
+	current.UpdatedAt = time.Now().UTC()
+	current.DeletedAt = nil
+
+	tagsJSON, err := json.Marshal(current.Tags)
+	if err != nil {
+		return nil, false, fmt.Errorf("encoding tags: %w", err)
+	}
+	ftEncoded, err := ft.Encode()
+	if err != nil {
+		return nil, false, err
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		UPDATE notes SET
+			title = ?, folder = ?, tags = ?, created = ?, updated = ?, pinned = ?,
+			seq = ?, updated_at = ?, deleted_at = NULL, field_updated_at = ?
+		WHERE id = ?
+	`,
+		current.Title, current.Folder, string(tagsJSON), current.Created, current.Updated, current.Pinned,
+		current.Seq, formatTime(current.UpdatedAt), ftEncoded, id,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("patching note: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, false, fmt.Errorf("committing note patch: %w", err)
+	}
+
+	// current already carries the correct Content/ContentState (decoded
+	// by scanNoteWithFieldTimestamps before we touched only metadata
+	// fields above) — content_crdt itself isn't part of this UPDATE.
+	return &current, true, nil
+}
+
 func (s *store) getNote(ctx context.Context, id string) (*Note, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, user_id, title, folder, tags, created, updated, pinned, content_crdt, seq, updated_at, deleted_at
@@ -313,6 +434,58 @@ func scanNote(row *sql.Rows) (Note, error) {
 	}
 
 	return n, nil
+}
+
+// scanNoteWithFieldTimestamps reads the single row from a query
+// selecting the same columns as scanNote plus a trailing
+// field_updated_at, returning errNotFound if there's no such row —
+// used by patchNote.
+func scanNoteWithFieldTimestamps(rows *sql.Rows) (Note, string, error) {
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return Note{}, "", fmt.Errorf("querying note: %w", err)
+		}
+		return Note{}, "", errNotFound
+	}
+
+	var n Note
+	var tags, updatedAt, fieldUpdatedAt string
+	var deletedAt sql.NullString
+	if err := rows.Scan(
+		&n.ID, &n.UserID, &n.Title, &n.Folder, &tags, &n.Created, &n.Updated,
+		&n.Pinned, &n.ContentCRDT, &n.Seq, &updatedAt, &deletedAt, &fieldUpdatedAt,
+	); err != nil {
+		return Note{}, "", fmt.Errorf("scanning note: %w", err)
+	}
+
+	if err := json.Unmarshal([]byte(tags), &n.Tags); err != nil {
+		return Note{}, "", fmt.Errorf("decoding tags: %w", err)
+	}
+
+	text, err := crdt.Text(n.ContentCRDT)
+	if err != nil {
+		return Note{}, "", fmt.Errorf("decoding content: %w", err)
+	}
+	n.Content = text
+	if len(n.ContentCRDT) > 0 {
+		n.ContentState = base64.StdEncoding.EncodeToString(n.ContentCRDT)
+	}
+
+	updated, err := parseTime(updatedAt)
+	if err != nil {
+		return Note{}, "", err
+	}
+	n.UpdatedAt = updated
+
+	if deletedAt.Valid {
+		d, err := parseTime(deletedAt.String)
+		if err != nil {
+			return Note{}, "", err
+		}
+		n.DeletedAt = &d
+	}
+
+	return n, fieldUpdatedAt, nil
 }
 
 func formatTime(t time.Time) string {

@@ -170,6 +170,176 @@ func TestUpsertTaskAfterSoftDeleteResurrectsRow(t *testing.T) {
 	}
 }
 
+func TestPatchTaskAppliesIndependentFields(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	base := time.Now()
+	if _, err := s.upsertTask(ctx, sampleTask("user-1", base)); err != nil {
+		t.Fatalf("initial upsertTask: %v", err)
+	}
+
+	// Two "devices" edit different fields concurrently — both should
+	// survive, unlike whole-row LWW.
+	titlePatch := Patch{Title: db.Field[string]{Set: true, Value: "new title"}}
+	stored, changed, err := s.patchTask(ctx, "task-1", "user-1", titlePatch, base.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("patchTask (title): %v", err)
+	}
+	if !changed || stored.Title != "new title" {
+		t.Fatalf("expected title patch to apply, got changed=%v stored=%+v", changed, stored)
+	}
+	if stored.Status != "todo" {
+		t.Fatalf("expected status untouched by title-only patch, got %q", stored.Status)
+	}
+
+	statusPatch := Patch{Status: db.Field[string]{Set: true, Value: "done"}}
+	stored, changed, err = s.patchTask(ctx, "task-1", "user-1", statusPatch, base.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("patchTask (status): %v", err)
+	}
+	if !changed || stored.Status != "done" {
+		t.Fatalf("expected status patch to apply, got changed=%v stored=%+v", changed, stored)
+	}
+	if stored.Title != "new title" {
+		t.Fatalf("expected earlier title edit to survive, got %q", stored.Title)
+	}
+}
+
+func TestPatchTaskDiscardsStaleFieldSilently(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	base := time.Now()
+	if _, err := s.upsertTask(ctx, sampleTask("user-1", base)); err != nil {
+		t.Fatalf("initial upsertTask: %v", err)
+	}
+
+	winner := Patch{Title: db.Field[string]{Set: true, Value: "winner"}}
+	if _, _, err := s.patchTask(ctx, "task-1", "user-1", winner, base.Add(2*time.Minute)); err != nil {
+		t.Fatalf("patchTask (winner): %v", err)
+	}
+
+	// A write timestamped before the winner must not overwrite it, and
+	// must not error — it's silently discarded (see specs/lww-por-campo).
+	loser := Patch{Title: db.Field[string]{Set: true, Value: "loser"}}
+	stored, changed, err := s.patchTask(ctx, "task-1", "user-1", loser, base.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("patchTask (loser): %v", err)
+	}
+	if changed {
+		t.Fatalf("expected no change from a stale field write, got changed=true")
+	}
+	if stored.Title != "winner" {
+		t.Fatalf("expected winner's title to survive, got %q", stored.Title)
+	}
+}
+
+func TestPatchTaskAllFieldsStaleReturns200NoSeqBump(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	base := time.Now()
+	if _, err := s.upsertTask(ctx, sampleTask("user-1", base)); err != nil {
+		t.Fatalf("initial upsertTask: %v", err)
+	}
+	// Give "title" a real field_updated_at first — a completely fresh
+	// row accepts any timestamp unconditionally (see
+	// TestPatchTaskOnFreshRowAcceptsAnyTimestamp), so a "stale" write
+	// against an untouched field wouldn't actually be stale.
+	winner := Patch{Title: db.Field[string]{Set: true, Value: "already current"}}
+	afterWinner, _, err := s.patchTask(ctx, "task-1", "user-1", winner, base.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("seeding winner patch: %v", err)
+	}
+	seqBefore := afterWinner.Seq
+
+	stale := Patch{Title: db.Field[string]{Set: true, Value: "too late"}}
+	stored, changed, err := s.patchTask(ctx, "task-1", "user-1", stale, base.Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("patchTask: %v", err)
+	}
+	if changed {
+		t.Fatalf("expected changed=false for an entirely stale patch")
+	}
+	if stored.Seq != seqBefore {
+		t.Fatalf("expected seq unchanged (%d), got %d", seqBefore, stored.Seq)
+	}
+	if stored.Title != "already current" {
+		t.Fatalf("expected winner's title to survive, got %q", stored.Title)
+	}
+}
+
+func TestPatchTaskOnFreshRowAcceptsAnyTimestamp(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	base := time.Now()
+	if _, err := s.upsertTask(ctx, sampleTask("user-1", base)); err != nil {
+		t.Fatalf("initial upsertTask: %v", err)
+	}
+
+	// field_updated_at is empty right after creation (POST doesn't
+	// populate it) — the first PATCH to any field wins unconditionally,
+	// even with an "old" timestamp relative to the row's updated_at.
+	patch := Patch{Project: db.Field[string]{Set: true, Value: "new-project"}}
+	stored, changed, err := s.patchTask(ctx, "task-1", "user-1", patch, base.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("patchTask: %v", err)
+	}
+	if !changed || stored.Project != "new-project" {
+		t.Fatalf("expected the first patch to a never-touched field to apply, got changed=%v stored=%+v", changed, stored)
+	}
+}
+
+func TestPatchTaskRejectsCrossUserOwnership(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if _, err := s.upsertTask(ctx, sampleTask("user-1", time.Now())); err != nil {
+		t.Fatalf("initial upsertTask: %v", err)
+	}
+
+	patch := Patch{Title: db.Field[string]{Set: true, Value: "hijacked"}}
+	_, _, err := s.patchTask(ctx, "task-1", "user-2", patch, time.Now())
+	if !errors.Is(err, errForbidden) {
+		t.Fatalf("expected errForbidden, got %v", err)
+	}
+}
+
+func TestPatchTaskNotFound(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	patch := Patch{Title: db.Field[string]{Set: true, Value: "x"}}
+	_, _, err := s.patchTask(ctx, "does-not-exist", "user-1", patch, time.Now())
+	if !errors.Is(err, errNotFound) {
+		t.Fatalf("expected errNotFound, got %v", err)
+	}
+}
+
+func TestPatchTaskNullableFieldExplicitNullClears(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	base := time.Now()
+	in := sampleTask("user-1", base)
+	code := "TASK-1"
+	in.TaskCode = &code
+	if _, err := s.upsertTask(ctx, in); err != nil {
+		t.Fatalf("initial upsertTask: %v", err)
+	}
+
+	patch := Patch{TaskCode: db.Field[*string]{Set: true, Value: nil}}
+	stored, changed, err := s.patchTask(ctx, "task-1", "user-1", patch, base.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("patchTask: %v", err)
+	}
+	if !changed || stored.TaskCode != nil {
+		t.Fatalf("expected task_code cleared to nil, got changed=%v taskCode=%v", changed, stored.TaskCode)
+	}
+}
+
 func TestListTasksIsScopedToUser(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

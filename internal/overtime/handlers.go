@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/jorgebuitragor/logday-server/internal/auth"
+	"github.com/jorgebuitragor/logday-server/internal/db"
 	"github.com/jorgebuitragor/logday-server/internal/realtime"
 )
 
@@ -32,11 +33,11 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Use(h.auth.RequireAuth)
 
 		r.Post("/overtime-entries", h.createEntry)
-		r.Put("/overtime-entries/{id}", h.updateEntry)
+		r.Patch("/overtime-entries/{id}", h.patchEntry)
 		r.Delete("/overtime-entries/{id}", h.deleteEntry)
 		r.Get("/overtime-entries", h.listEntries)
 
-		r.Put("/overtime-month-meta/{yearMonth}", h.putMonthMeta)
+		r.Patch("/overtime-month-meta/{yearMonth}", h.patchMonthMeta)
 		r.Delete("/overtime-month-meta/{yearMonth}", h.deleteMonthMeta)
 		r.Get("/overtime-month-meta", h.listMonthMeta)
 	})
@@ -100,22 +101,84 @@ func (h *Handler) createEntry(w http.ResponseWriter, r *http.Request) {
 	h.upsertEntry(w, r, &e)
 }
 
-func (h *Handler) updateEntry(w http.ResponseWriter, r *http.Request) {
-	userID, _ := auth.UserIDFromContext(r.Context())
+// parseEntryPatch reads a PATCH body's raw fields into an EntryPatch.
+func parseEntryPatch(raw map[string]json.RawMessage) (EntryPatch, error) {
+	var patch EntryPatch
+	var err error
+	if patch.Fecha, err = db.PatchField[string](raw, "fecha"); err != nil {
+		return EntryPatch{}, err
+	}
+	if patch.SolicitadaPor, err = db.PatchField[string](raw, "solicitada_por"); err != nil {
+		return EntryPatch{}, err
+	}
+	if patch.Actividad, err = db.PatchField[string](raw, "actividad"); err != nil {
+		return EntryPatch{}, err
+	}
+	if patch.Observaciones, err = db.PatchField[string](raw, "observaciones"); err != nil {
+		return EntryPatch{}, err
+	}
+	if patch.HoraInicio, err = db.PatchField[string](raw, "hora_inicio"); err != nil {
+		return EntryPatch{}, err
+	}
+	if patch.HoraFinal, err = db.PatchField[string](raw, "hora_final"); err != nil {
+		return EntryPatch{}, err
+	}
+	if patch.TotalHoras, err = db.PatchField[float64](raw, "total_horas"); err != nil {
+		return EntryPatch{}, err
+	}
+	if patch.ExtrasDiurnas, err = db.PatchField[float64](raw, "extras_diurnas"); err != nil {
+		return EntryPatch{}, err
+	}
+	if patch.ExtrasNocturnas, err = db.PatchField[float64](raw, "extras_nocturnas"); err != nil {
+		return EntryPatch{}, err
+	}
+	if patch.ExtrasDiurnasFestivas, err = db.PatchField[float64](raw, "extras_diurnas_festivas"); err != nil {
+		return EntryPatch{}, err
+	}
+	if patch.ExtrasNocturnasFestivas, err = db.PatchField[float64](raw, "extras_nocturnas_festivas"); err != nil {
+		return EntryPatch{}, err
+	}
+	return patch, nil
+}
 
-	var req entryRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+func (h *Handler) patchEntry(w http.ResponseWriter, r *http.Request) {
+	userID, _ := auth.UserIDFromContext(r.Context())
+	id := chi.URLParam(r, "id")
+
+	raw, err := db.ParsePatch(r.Body)
+	if err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	req.ID = chi.URLParam(r, "id")
-	if err := validateEntryRequest(req); err != nil {
+
+	updatedAt, err := db.PatchField[time.Time](raw, "updated_at")
+	if err != nil || !updatedAt.Set || updatedAt.Value.IsZero() {
+		http.Error(w, "updated_at is required", http.StatusBadRequest)
+		return
+	}
+
+	patch, err := parseEntryPatch(raw)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	e := req.toEntry(userID)
-	h.upsertEntry(w, r, &e)
+	stored, changed, err := h.store.patchEntry(r.Context(), id, userID, patch, updatedAt.Value)
+	if err != nil {
+		switch {
+		case errors.Is(err, errNotFound):
+			http.Error(w, "overtime entry not found", http.StatusNotFound)
+		case errors.Is(err, errForbidden):
+			http.Error(w, "overtime entry belongs to another user", http.StatusForbidden)
+		default:
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
+		return
+	}
+	if changed {
+		h.realtime.Notify(stored.UserID, "overtime_entry", stored.ID, stored.Seq)
+	}
+	writeJSON(w, http.StatusOK, stored)
 }
 
 func (h *Handler) upsertEntry(w http.ResponseWriter, r *http.Request, e *Entry) {
@@ -171,41 +234,40 @@ func (h *Handler) listEntries(w http.ResponseWriter, r *http.Request) {
 
 // --- MonthMeta ---
 
-type monthMetaRequest struct {
-	Colaborador string    `json:"colaborador"`
-	Cedula      string    `json:"cedula"`
-	UpdatedAt   time.Time `json:"updated_at"`
-}
-
-func (h *Handler) putMonthMeta(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) patchMonthMeta(w http.ResponseWriter, r *http.Request) {
 	userID, _ := auth.UserIDFromContext(r.Context())
 	yearMonth := chi.URLParam(r, "yearMonth")
 
-	var req monthMetaRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	raw, err := db.ParsePatch(r.Body)
+	if err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if req.UpdatedAt.IsZero() {
+
+	updatedAt, err := db.PatchField[time.Time](raw, "updated_at")
+	if err != nil || !updatedAt.Set || updatedAt.Value.IsZero() {
 		http.Error(w, "updated_at is required", http.StatusBadRequest)
 		return
 	}
 
-	m := MonthMeta{
-		UserID: userID, YearMonth: yearMonth, Colaborador: req.Colaborador,
-		Cedula: req.Cedula, UpdatedAt: req.UpdatedAt,
+	var patch MonthMetaPatch
+	if patch.Colaborador, err = db.PatchField[string](raw, "colaborador"); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if patch.Cedula, err = db.PatchField[string](raw, "cedula"); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
-	stored, err := h.store.upsertMonthMeta(r.Context(), &m)
+	stored, changed, err := h.store.patchMonthMeta(r.Context(), userID, yearMonth, patch, updatedAt.Value)
 	if err != nil {
-		if errors.Is(err, errConflict) {
-			http.Error(w, "a newer version of this month's metadata already exists", http.StatusConflict)
-			return
-		}
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	h.realtime.Notify(stored.UserID, "overtime_month_meta", stored.YearMonth, stored.Seq)
+	if changed {
+		h.realtime.Notify(stored.UserID, "overtime_month_meta", stored.YearMonth, stored.Seq)
+	}
 	writeJSON(w, http.StatusOK, stored)
 }
 

@@ -43,3 +43,4 @@ tres archivos:
 | Esquema de datos | implementado | [`esquema-datos/`](./esquema-datos/requirements.md) |
 | Convenciones de código | en diseño | [`convenciones-codigo/`](./convenciones-codigo/requirements.md) |
 | Panel de administración web | implementado | [`panel-admin/`](./panel-admin/requirements.md) |
+| LWW por campo | implementado (sin mergear) | [`lww-por-campo/`](./lww-por-campo/requirements.md) |

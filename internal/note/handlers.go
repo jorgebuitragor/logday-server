@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/jorgebuitragor/logday-server/internal/auth"
+	"github.com/jorgebuitragor/logday-server/internal/db"
 	"github.com/jorgebuitragor/logday-server/internal/realtime"
 )
 
@@ -36,7 +37,7 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Use(h.auth.RequireAuth)
 
 		r.Post("/notes", h.create)
-		r.Put("/notes/{id}", h.update)
+		r.Patch("/notes/{id}", h.patch)
 		r.Post("/notes/{id}/content", h.postContent)
 		r.Delete("/notes/{id}", h.delete)
 		r.Get("/notes", h.list)
@@ -98,22 +99,83 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	h.upsert(w, r, &n)
 }
 
-func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
-	userID, _ := auth.UserIDFromContext(r.Context())
+// parseNotePatch reads a PATCH body's raw fields into a Patch.
+func parseNotePatch(raw map[string]json.RawMessage) (Patch, error) {
+	var patch Patch
+	var err error
+	if patch.Title, err = db.PatchField[string](raw, "title"); err != nil {
+		return Patch{}, err
+	}
+	if patch.Folder, err = db.PatchField[string](raw, "folder"); err != nil {
+		return Patch{}, err
+	}
+	if patch.Tags, err = db.PatchField[[]string](raw, "tags"); err != nil {
+		return Patch{}, err
+	}
+	if patch.Created, err = db.PatchField[string](raw, "created"); err != nil {
+		return Patch{}, err
+	}
+	if patch.Updated, err = db.PatchField[string](raw, "updated"); err != nil {
+		return Patch{}, err
+	}
+	if patch.Pinned, err = db.PatchField[bool](raw, "pinned"); err != nil {
+		return Patch{}, err
+	}
+	return patch, nil
+}
 
-	var req noteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+func validateNotePatch(patch Patch) error {
+	if patch.Title.Set && patch.Title.Value == "" {
+		return errors.New("title cannot be empty")
+	}
+	if patch.Created.Set && patch.Created.Value == "" {
+		return errors.New("created cannot be empty")
+	}
+	return nil
+}
+
+func (h *Handler) patch(w http.ResponseWriter, r *http.Request) {
+	userID, _ := auth.UserIDFromContext(r.Context())
+	id := chi.URLParam(r, "id")
+
+	raw, err := db.ParsePatch(r.Body)
+	if err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	req.ID = chi.URLParam(r, "id")
-	if err := validateNoteRequest(req); err != nil {
+
+	updatedAt, err := db.PatchField[time.Time](raw, "updated_at")
+	if err != nil || !updatedAt.Set || updatedAt.Value.IsZero() {
+		http.Error(w, "updated_at is required", http.StatusBadRequest)
+		return
+	}
+
+	patch, err := parseNotePatch(raw)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := validateNotePatch(patch); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	n := req.toNote(userID)
-	h.upsert(w, r, &n)
+	stored, changed, err := h.store.patchNote(r.Context(), id, userID, patch, updatedAt.Value)
+	if err != nil {
+		switch {
+		case errors.Is(err, errNotFound):
+			http.Error(w, "note not found", http.StatusNotFound)
+		case errors.Is(err, errForbidden):
+			http.Error(w, "note belongs to another user", http.StatusForbidden)
+		default:
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
+		return
+	}
+	if changed {
+		h.realtime.Notify(stored.UserID, "note", stored.ID, stored.Seq)
+	}
+	writeJSON(w, http.StatusOK, stored)
 }
 
 func (h *Handler) upsert(w http.ResponseWriter, r *http.Request, n *Note) {

@@ -73,10 +73,13 @@ para múltiples clientes de Logday (desktop, web, móvil, extensión).
   escrituras parciales (PATCH) — ninguna de las dos cosas existe hoy
   en el cliente de referencia (`task-manager`) — y bloquear la primera
   entidad de negocio hasta resolver eso no se justificaba.
-- **Aspiracional, no implementado**: last-write-wins **por campo**
-  individual (no por registro completo), de forma que dos ediciones
-  concurrentes a campos distintos de la misma fila sobrevivan ambas.
-  Queda como mejora futura — ver `esquema-datos/design.md`.
+- **En diseño**: last-write-wins **por campo** individual (no por
+  registro completo), de forma que dos ediciones concurrentes a campos
+  distintos de la misma fila sobrevivan ambas, sin que el cliente
+  tenga que involucrar al usuario para resolverlo. Ver
+  [`lww-por-campo/`](../lww-por-campo/requirements.md) para el
+  protocolo (`PATCH` parcial + servidor como única fuente de verdad
+  del merge).
 - El sistema DEBERÁ resolver conflictos en campos de texto largo
   (`Note.content`, `daily_entries.content`) mediante **CRDT**, para que
   ediciones concurrentes de texto en distintos dispositivos se
