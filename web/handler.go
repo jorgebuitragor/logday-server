@@ -44,8 +44,25 @@ func Routes(r chi.Router) {
 				reqPath = "" // not a real file — fall back to index.html
 			}
 		}
+		setCacheHeaders(w, reqPath)
 		r2 := r.Clone(r.Context())
 		r2.URL.Path = "/" + reqPath
 		fileServer.ServeHTTP(w, r2)
 	})
+}
+
+// setCacheHeaders keeps index.html always revalidated (it references
+// the current build's hashed asset filenames — cache it and a
+// redeploy silently keeps serving the old JS/CSS forever, since the
+// browser never even asks) while letting the hashed assets under
+// assets/ cache aggressively (their filename changes whenever their
+// content does, so there's nothing to invalidate).
+func setCacheHeaders(w http.ResponseWriter, reqPath string) {
+	if reqPath == "" || reqPath == "index.html" {
+		w.Header().Set("Cache-Control", "no-cache")
+		return
+	}
+	if strings.HasPrefix(reqPath, "assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	}
 }
