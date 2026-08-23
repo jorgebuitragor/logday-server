@@ -57,6 +57,36 @@ func TestAppUnknownClientRouteFallsBackToIndex(t *testing.T) {
 	}
 }
 
+func TestAppIndexIsNeverCached(t *testing.T) {
+	r := newTestRouter()
+	req := httptest.NewRequest(http.MethodGet, "/app/", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Fatalf("got Cache-Control %q for index.html, want %q — a stale cached index.html keeps pointing at old hashed assets forever after a redeploy", cc, "no-cache")
+	}
+}
+
+func TestSetCacheHeaders(t *testing.T) {
+	cases := []struct {
+		reqPath string
+		want    string
+	}{
+		{"", "no-cache"},
+		{"index.html", "no-cache"},
+		{"assets/index-abc123.js", "public, max-age=31536000, immutable"},
+		{"logo.png", ""}, // no opinion — not hashed, not index.html
+	}
+	for _, c := range cases {
+		rec := httptest.NewRecorder()
+		setCacheHeaders(rec, c.reqPath)
+		if got := rec.Header().Get("Cache-Control"); got != c.want {
+			t.Errorf("setCacheHeaders(%q): got Cache-Control %q, want %q", c.reqPath, got, c.want)
+		}
+	}
+}
+
 func TestAppDoesNotShadowAPIRoutes(t *testing.T) {
 	r := newTestRouter()
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
