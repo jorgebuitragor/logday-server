@@ -1,6 +1,9 @@
 # Convenciones de código — Requirements
 
-Estado: en diseño
+Estado: implementado — logging y manejo de errores quedaban
+"diferidos a la primera feature real"; con 9 paquetes de dominio ya
+construidos, la convención de facto es consistente en todos y nunca se
+había escrito. Ver `design.md`.
 
 ## Contexto
 
@@ -48,8 +51,31 @@ improvisar la estructura entidad por entidad a medida que se escribe.
 - El sistema DEBERÁ correr el linter en CI (GitHub Actions) en cada
   push y pull request contra `main`, fallando el build si hay errores.
 
+### Logging y manejo de errores
+
+- El sistema DEBERÁ usar el paquete `log` de la librería estándar para
+  todo logging — sin `slog` ni una librería estructurada de terceros.
+- Un error de infraestructura (fallo de base de datos, I/O) DEBERÁ
+  envolverse con `fmt.Errorf("<acción en minúscula>: %w", err)` al
+  propagarse, para que `errors.Is`/`errors.As` sigan la cadena hasta
+  el handler.
+- Un caso de negocio esperable (no encontrado, prohibido para este
+  usuario, conflicto de versión) DEBERÁ señalizarse con un error
+  centinela propio del paquete (`errNotFound`, `errForbidden`,
+  `errConflict`, sin exportar) en vez de comparar el mensaje de texto
+  del error.
+- El handler HTTP de cada dominio DEBERÁ mapear esos centinelas a su
+  código HTTP específico vía `errors.Is`, con un `default` genérico
+  (`500`, sin exponer el error interno) para cualquier otro error no
+  anticipado.
+- Un error de validación de entrada (campo requerido, formato
+  inválido) DEBERÁ devolverse como `errors.New("<mensaje>")` plano
+  desde una función `validate<X>Request`, distinto de los centinelas
+  de negocio — se traduce a `400` con ese mensaje tal cual, no a
+  través del mapeo de centinelas.
+
 ## Fuera de este spec
 
-- Convenciones de logging, manejo de errores, o config/env vars —
-  se definen cuando se implemente la primera feature real, no aquí.
+- Convenciones de config/env vars — no decidido, se define si hace
+  falta.
 - Cobertura de tests obligatoria o mínima — no decidido.

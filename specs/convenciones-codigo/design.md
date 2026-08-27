@@ -1,6 +1,6 @@
 # Convenciones de código — Diseño
 
-Estado: en diseño
+Estado: implementado — ver "Logging y manejo de errores" abajo.
 
 ## Estructura de paquetes: vertical por dominio
 
@@ -180,10 +180,61 @@ lint (`golangci-lint-action@v7`, pinneado a la misma versión que se
 usa en local, v2.12.2) y otro de build+test — ambos corriendo en cada
 push a `main` y en cada pull request.
 
-## Explícitamente pendiente
+## Logging y manejo de errores
 
-- Convenciones de logging (¿`log` estándar, `slog`, o una librería
-  estructurada?) — se decide al implementar la primera feature real.
-- Manejo de errores (¿wrapping estándar con `fmt.Errorf("%w")`, tipos
-  de error propios para casos de negocio?).
-- Cobertura mínima de tests, si la hay.
+Nunca se había escrito, pero es consistente en los 9 paquetes de
+dominio (`auth`, `task`, `note`, `overtime`, `calendar`, `absence`,
+`dailyentry`, `sync`, `realtime`) desde el primer scaffold — se
+documenta acá tal cual está implementado, no se decide nada nuevo.
+
+**Logging**: paquete `log` de la librería estándar
+(`log.Print`/`log.Printf`/`log.Fatal`/`log.Fatalf`), sin `slog` ni
+ninguna librería estructurada de terceros — mismo criterio minimalista
+que el resto del proyecto ("un único contenedor, cero dependencias
+obligatorias"). Uso disperso, no en cada request: eventos de ciclo de
+vida en `cmd/server/main.go` (arranque, migraciones, bootstrap del
+admin, purga de tombstones) y unos pocos "loguear y seguir" donde un
+fallo no debe romper la response completa (`internal/auth/helpers.go`
+al renderizar un template, `internal/auth/ratelimit.go` al leer config
+opcional). No hay logging por request en el hot path de la API.
+
+**Tres niveles de error, cada uno con su propia forma**:
+
+1. **Wrapping de infraestructura** (`store.go`, siempre): `fmt.Errorf`
+   con el verbo en minúscula describiendo la acción, sin punto final,
+   terminando en `: %w` — `fmt.Errorf("upserting task: %w", err)`,
+   `fmt.Errorf("beginning transaction: %w", err)`. Mantiene la cadena
+   navegable con `errors.Is`/`errors.As` hasta donde se maneje.
+2. **Centinelas de negocio** (`store.go`, `var` package-private):
+   `errNotFound`, `errForbidden`, `errConflict` — idénticos en nombre
+   y forma en `task`, `note`, `overtime`, `calendar`, `absence`
+   (`dailyentry` solo tiene `errNotFound`, no hay noción de
+   "forbidden" ahí; `sync` tiene su propio `errCursorInvalid`; `auth`
+   agrega los suyos — `errDuplicateEmail`, `errLastAdmin`,
+   `errAlreadyInit` — para casos que no encajan en los tres
+   genéricos). Nunca se comparan mensajes de texto — siempre
+   `errors.Is(err, errX)`.
+3. **Validación de entrada** (`handlers.go`, antes de tocar el store):
+   `errors.New("<mensaje>")` plano desde una función
+   `validate<X>Request` — ver `internal/absence/handlers.go`,
+   `internal/calendar/handlers.go`. Distinto de los centinelas a
+   propósito: es un error del *pedido* (campo faltante, formato
+   inválido), no un estado del *dominio* — se traduce directo a `400`
+   con ese mensaje, no pasa por el mapeo de centinelas.
+
+**Mapeo a HTTP, siempre en el handler, nunca en el store**: un
+`switch { case errors.Is(err, errNotFound): ...404; case
+errors.Is(err, errForbidden): ...403; default: http.Error(w,
+"internal error", 500) }` — ver `internal/task/handlers.go` como
+referencia. El `default` nunca expone el error interno real al
+cliente (evita filtrar detalle de implementación/queries SQL). Un
+error de negocio nuevo en un dominio nuevo sigue este mismo patrón de
+tres niveles, no inventa uno propio.
+
+**Hueco conocido, no resuelto acá**: el `default` de cada `switch` no
+loguea el error real antes de devolver `500` — hoy un fallo
+inesperado (ej. la base de datos caída a mitad de un write) es
+invisible del lado servidor, solo lo nota el cliente por el status
+code. Documentado como gap real, no como parte de la convención — si
+se agrega, tiene que ser consistente en los 9 dominios a la vez, no
+parche por parche.

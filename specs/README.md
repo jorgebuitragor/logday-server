@@ -41,7 +41,7 @@ tres archivos:
 | Sync incremental | implementado | [`sync-incremental/`](./sync-incremental/requirements.md) |
 | Auth multi-usuario | implementado (v1) | [`auth-multiusuario/`](./auth-multiusuario/requirements.md) |
 | Esquema de datos | implementado | [`esquema-datos/`](./esquema-datos/requirements.md) |
-| Convenciones de código | en diseño | [`convenciones-codigo/`](./convenciones-codigo/requirements.md) |
+| Convenciones de código | implementado | [`convenciones-codigo/`](./convenciones-codigo/requirements.md) |
 | Panel de administración web | implementado | [`panel-admin/`](./panel-admin/requirements.md) |
 | LWW por campo | implementado (sin mergear) | [`lww-por-campo/`](./lww-por-campo/requirements.md) |
 | Web app embebida | implementado (sin mergear) | [`webapp-embebida/`](./webapp-embebida/requirements.md) |
