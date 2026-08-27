@@ -1,12 +1,15 @@
 # Papelera compartida entre servicios — Requirements
 
-Estado: parcial — desktop (`task-manager`) y web (`logday-web`) ya
-implementaron cada uno su propia papelera local (ver
-`specs/papelera-reciclaje/` y `specs/papelera-compartida/` de esos
-repos respectivamente, commit `b8d5b57` para desktop). Mobile sigue
-sin implementar. Este servidor sigue sin cambios — las preguntas
-abiertas de abajo no las resolvió ninguno de los dos clientes, siguen
-pendientes de decisión acá.
+Estado: implementado (sin cambios de código) — desktop (`task-manager`)
+y web (`logday-web`) ya implementaron cada uno su propia papelera
+local (ver `specs/papelera-reciclaje/` y `specs/papelera-compartida/`
+de esos repos respectivamente, commit `b8d5b57` para desktop). Las
+preguntas que quedaban abiertas del lado servidor ya se decidieron
+(ver "Decisiones" abajo): ninguna requiere tocar código acá, el
+comportamiento actual (retención indefinida, sin hard-delete) queda
+confirmado como el diseño final, no un accidente. Mobile sigue sin
+implementar — no es una decisión pendiente, es trabajo de cliente sin
+hacer.
 
 ## Contexto
 
@@ -34,33 +37,46 @@ dispositivos, y el historial completo está disponible desde
 `logday-web` ya implementó el mismo mecanismo (capturar snapshot al
 borrar y al recibir un delete remoto, UI de listar/restaurar/purgar) —
 ver `specs/papelera-compartida/requirements.md` de ese repo. Con eso,
-cada servicio tiene su propia papelera local funcionando — lo que
-sigue sin resolver es si este servidor necesita algo nuevo para
-soportar una papelera de verdad *unificada* entre servicios (ver
-preguntas abiertas abajo), y mobile sigue sin implementar nada.
+cada servicio tiene su propia papelera local funcionando — no una
+vista unificada entre servicios (ningún cliente pidió eso, y este
+servidor no expone hoy ningún endpoint que lo permitiría sin volver a
+diseñar el modelo). Lo que faltaba decidir del lado servidor (ver
+"Decisiones" abajo) ya está resuelto: no hace falta tocar código acá.
+Mobile sigue sin implementar nada de esto.
 
-## Preguntas abiertas (PENDIENTE DE DECISIÓN)
+## Decisiones (ya tomadas)
 
-- **¿El servidor debe seguir reteniendo soft-deletes para siempre?**
-  Hoy lo hace, pero por ausencia de un job de limpieza, no por una
-  decisión documentada — un cliente que reconstruye su papelera desde
-  `/sync/changes since=0` depende implícitamente de que ningún soft-
-  delete se purgue solo del lado servidor. Si en algún momento se
-  agrega una purga automática acá, tiene que ser >= la retención más
-  larga que cualquier cliente use para su propia papelera local (hoy,
-  60 días en desktop) — o los clientes perderían la posibilidad de
-  restaurar algo que el servidor ya tiró.
-- **¿Hace falta un endpoint de hard-delete real?** Hoy "vaciar la
-  papelera" en desktop solo deja de mostrar el ítem localmente — el
-  registro sigue soft-deleted en la base de datos del servidor para
-  siempre. Si se quiere que "vaciar papelera" purgue de verdad (por
-  ejemplo, por espacio o cumplimiento), hace falta un endpoint nuevo
-  (`DELETE` definitivo, distinto del soft-delete actual) que hoy no
-  existe en ninguna entidad.
-- **¿`daily_entry` entra en esto?** Ya sincroniza normal del lado
-  servidor y `logday-web` ya lo incluye en su papelera — la limitación
-  era específica de `task-manager` (ver
-  `specs/sync-primer-sincronizacion` de ese repo, "mismatch de modelo
-  local"), no del servidor ni de web. Sigue siendo prerequisito
-  resolver eso en Desktop antes de que su papelera lo incluya ahí
-  también.
+- [x] **El servidor NO purga soft-deletes automáticamente — retención
+  indefinida, a propósito.** Antes era así por ausencia de un job de
+  limpieza, no por decisión; ahora es el diseño confirmado. Motivos:
+  (1) el volumen es metadata/texto a escala de un usuario o equipo
+  chico — no hay problema real de espacio que justifique la
+  complejidad de un job de purga; (2) cualquier retención finita
+  tendría que ser mayor o igual a la de **todos** los clientes,
+  incluidos los que desactiven su purga automática local para guardar
+  "para siempre" — coordinar eso entre clientes sin un canal para
+  comunicar la config no es confiable, así que no purgar nunca es la
+  única forma de no arriesgar perder la posibilidad de restaurar algo
+  que un cliente todavía muestra en su papelera; (3) coherente con el
+  principio local-first ya documentado en `arquitectura-inicial`: el
+  servidor es un nodo de sync, no la fuente de verdad única, así que
+  retener más historia de la estrictamente necesaria no compromete
+  nada. Si en el futuro el volumen real de una instancia se vuelve un
+  problema, esto se revisita con datos concretos, no especulando.
+- [x] **No se agrega un endpoint de hard-delete.** "Vaciar papelera"
+  sigue siendo 100% client-local (deja de mostrarse, nunca toca el
+  servidor) — ningún cliente lo prometió como borrado real, y no hay
+  un caso de uso concreto (espacio, cumplimiento) que lo pida hoy.
+  Agregar un `DELETE` irreversible de verdad es superficie de riesgo
+  real (borrado permanente) que no se justifica sin una necesidad
+  puntual — si aparece una (por ejemplo, un pedido de "derecho al
+  olvido" de un usuario real), se diseña como spec aparte en ese
+  momento, no preventivamente.
+- [x] **`daily_entry` no necesita nada nuevo acá.** Ya sincroniza
+  normal del lado servidor y `logday-web` ya lo incluye en su
+  papelera — la limitación que existía era específica de
+  `task-manager` (ver `specs/sync-primer-sincronizacion` de ese repo,
+  "mismatch de modelo local"), no del servidor ni de web. Sigue
+  siendo prerequisito resolver eso en Desktop antes de que su
+  papelera lo incluya ahí también, pero eso no bloquea nada de este
+  lado.
