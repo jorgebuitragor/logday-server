@@ -45,4 +45,4 @@ tres archivos:
 | Panel de administración web | implementado | [`panel-admin/`](./panel-admin/requirements.md) |
 | LWW por campo | implementado (sin mergear) | [`lww-por-campo/`](./lww-por-campo/requirements.md) |
 | Web app embebida | implementado (sin mergear) | [`webapp-embebida/`](./webapp-embebida/requirements.md) |
-| Papelera compartida entre servicios | pendiente | [`papelera-compartida/`](./papelera-compartida/requirements.md) |
+| Papelera compartida entre servicios | parcial | [`papelera-compartida/`](./papelera-compartida/requirements.md) |

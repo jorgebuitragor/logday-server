@@ -1,10 +1,12 @@
 # Papelera compartida entre servicios — Requirements
 
-Estado: pendiente — bloqueado a propósito hasta que desktop, web (y
-mobile, si aplica) estén alineados en el mismo modelo de papelera. Ver
-`task-manager` (Logday Desktop) `specs/papelera-reciclaje/` para la
-implementación de referencia ya construida ahí (commit
-`b8d5b57`, rama `feature/sync-servidor`).
+Estado: parcial — desktop (`task-manager`) y web (`logday-web`) ya
+implementaron cada uno su propia papelera local (ver
+`specs/papelera-reciclaje/` y `specs/papelera-compartida/` de esos
+repos respectivamente, commit `b8d5b57` para desktop). Mobile sigue
+sin implementar. Este servidor sigue sin cambios — las preguntas
+abiertas de abajo no las resolvió ninguno de los dos clientes, siguen
+pendientes de decisión acá.
 
 ## Contexto
 
@@ -29,12 +31,13 @@ que `/sync/changes` manda la fila completa de cada delete a todos los
 dispositivos, y el historial completo está disponible desde
 `since=0`.
 
-Lo que falta para que la papelera sea de verdad compartida entre
-**servicios** (no solo entre instalaciones desktop) es: que
-`logday-web` implemente el mismo mecanismo (capturar snapshot al
+`logday-web` ya implementó el mismo mecanismo (capturar snapshot al
 borrar y al recibir un delete remoto, UI de listar/restaurar/purgar) —
-ver spec equivalente en ese repo — y decidir si este servidor necesita
-algo nuevo para soportarlo bien.
+ver `specs/papelera-compartida/requirements.md` de ese repo. Con eso,
+cada servicio tiene su propia papelera local funcionando — lo que
+sigue sin resolver es si este servidor necesita algo nuevo para
+soportar una papelera de verdad *unificada* entre servicios (ver
+preguntas abiertas abajo), y mobile sigue sin implementar nada.
 
 ## Preguntas abiertas (PENDIENTE DE DECISIÓN)
 
@@ -54,8 +57,10 @@ algo nuevo para soportarlo bien.
   ejemplo, por espacio o cumplimiento), hace falta un endpoint nuevo
   (`DELETE` definitivo, distinto del soft-delete actual) que hoy no
   existe en ninguna entidad.
-- **¿`daily_entry` entra en esto?** Hoy no tiene ningún sync con el
-  servidor (ver `specs/sync-primer-sincronizacion` de `task-manager`,
-  "mismatch de modelo local") — una papelera compartida para dailys
-  necesitaría resolver eso primero, es un prerequisito de este spec,
-  no parte de él.
+- **¿`daily_entry` entra en esto?** Ya sincroniza normal del lado
+  servidor y `logday-web` ya lo incluye en su papelera — la limitación
+  era específica de `task-manager` (ver
+  `specs/sync-primer-sincronizacion` de ese repo, "mismatch de modelo
+  local"), no del servidor ni de web. Sigue siendo prerequisito
+  resolver eso en Desktop antes de que su papelera lo incluya ahí
+  también.
