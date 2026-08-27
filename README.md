@@ -1,5 +1,7 @@
 # Logday Server
 
+![local-first](./.github/badge-local-first.svg)
+
 API de sync self-hosted para [Logday](https://github.com/jorgebuitragor/logday),
 al estilo Vaultwarden/Bitwarden: se despliega con un único contenedor
 Docker, y cada cliente (desktop, web, móvil, extensión) se configura para

@@ -2,7 +2,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{if .InstanceName}}{{.InstanceName}}{{else}}Logday Server{{end}} — Admin</title>
-<link rel="icon" type="image/png" href="/admin/static/logo.png">
+<link rel="icon" type="image/svg+xml" href="/admin/static/logo.svg">
 <script>
   // Applied synchronously, before first paint, so there's no flash of
   // the wrong theme on load — reads the explicit choice saved by the
@@ -311,7 +311,7 @@
 {{define "nav"}}
 <header class="topbar">
   <div class="brand">
-    <img class="brand-logo" src="/admin/static/logo.png" alt="Logday">
+    <img class="brand-logo" src="/admin/static/logo.svg" alt="Logday">
     <span class="brand-name">{{if .InstanceName}}{{.InstanceName}}{{else}}Logday Server{{end}}</span>
   </div>
   <nav class="tabs">

@@ -9,11 +9,12 @@ import (
 var templateFS embed.FS
 
 // staticFS holds the panel's static assets — today just the Logday
-// brand mark (logo.png, copied from task-manager's src/assets/logo.png),
-// served as both the panel's favicon and its header logo so the panel
-// visually reads as the same product as the desktop app.
+// brand mark (logo.svg, the "server" variant from the Logday brand
+// system: mono white symbol on a dark rounded container, no accent —
+// see section 07 of the brand spec), served as both the panel's
+// favicon and its header logo.
 //
-//go:embed static/*.png
+//go:embed static/*.svg
 var staticFS embed.FS
 
 // parseTemplates parses every template under templates/ once, at

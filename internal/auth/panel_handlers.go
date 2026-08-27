@@ -22,7 +22,7 @@ import (
 // unambiguous when reading route registrations. Like Routes, it
 // registers directly on r (no sub-router / chi.Mount).
 func (h *Handler) PanelRoutes(r chi.Router) {
-	r.Get("/admin/static/logo.png", h.serveLogo)
+	r.Get("/admin/static/logo.svg", h.serveLogo)
 
 	r.Get("/setup", h.setupForm)
 	r.Post("/setup", h.setupSubmit)
@@ -54,13 +54,14 @@ func (h *Handler) PanelRoutes(r chi.Router) {
 // embedded at compile time, so it only ever changes across a binary
 // upgrade, never at runtime.
 func (h *Handler) serveLogo(w http.ResponseWriter, r *http.Request) {
-	data, err := staticFS.ReadFile("static/logo.png")
+	data, err := staticFS.ReadFile("static/logo.svg")
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
-	http.ServeContent(w, r, "logo.png", time.Time{}, bytes.NewReader(data))
+	http.ServeContent(w, r, "logo.svg", time.Time{}, bytes.NewReader(data))
 }
 
 type formPageData struct {
