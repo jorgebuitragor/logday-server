@@ -305,6 +305,20 @@ paths:
             format: int64
             minimum: 0
             default: 0
+        - name: limit
+          in: query
+          description: |
+            Tope opcional de cambios devueltos en esta respuesta (los de `seq`
+            más bajo primero). Omitir (o `0`) trae todo el delta sin paginar —
+            el comportamiento de siempre, sin ningún límite aplicado por
+            default. Si la respuesta viene con exactamente `limit` elementos,
+            puede haber más: repetir la consulta con `since` = el `seq` del
+            último elemento recibido hasta que llegue una página más corta que
+            `limit` (o vacía).
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
       responses:
         "200":
           description: OK — puede ser un array vacío si no hay cambios.
@@ -315,7 +329,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/SyncChange"
         "400":
-          description: "`since` no es un entero válido o es negativo."
+          description: "`since` o `limit` no son un entero válido, o son negativos."
           content:
             text/plain:
               schema:

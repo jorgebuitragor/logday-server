@@ -37,7 +37,15 @@ func NewStore(db *sql.DB) *store {
 // changesSince returns errCursorInvalid if since predates the purge
 // watermark for userID — callers must not treat that as "no changes",
 // since some tombstones in that range are gone and can't be reported.
-func (s *store) changesSince(ctx context.Context, userID string, since int64) ([]change, error) {
+//
+// limit (0 = unbounded) truncates the merged, seq-sorted result — it
+// does not push a LIMIT into each domain's own query, so this doesn't
+// reduce the cost of fetching from the 7 tables, only the size of the
+// response actually sent. See specs/sync-incremental/design.md
+// "Paginación" for why: doing this properly (a real cross-table LIMIT)
+// needs a bigger rewrite of the fan-out below, not justified without
+// evidence the query itself is the bottleneck.
+func (s *store) changesSince(ctx context.Context, userID string, since, limit int64) ([]change, error) {
 	if since > 0 {
 		purgedBefore, err := db.PurgedBeforeSeq(ctx, s.db, userID)
 		if err != nil {
@@ -153,6 +161,9 @@ func (s *store) changesSince(ctx context.Context, userID string, since int64) ([
 	// internal/db.NextSeq), so merging already-per-entity-sorted lists
 	// and re-sorting by seq gives a globally consistent order.
 	sort.Slice(changes, func(i, j int) bool { return changes[i].Seq < changes[j].Seq })
+	if limit > 0 && int64(len(changes)) > limit {
+		changes = changes[:limit]
+	}
 	return changes, nil
 }
 

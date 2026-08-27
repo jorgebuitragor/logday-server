@@ -43,7 +43,21 @@ func (h *Handler) changes(w http.ResponseWriter, r *http.Request) {
 		since = parsed
 	}
 
-	changes, err := h.store.changesSince(r.Context(), userID, since)
+	// limit es opcional — 0 (ausente) significa "sin límite", el
+	// comportamiento de siempre. Ver specs/sync-incremental/design.md
+	// "Paginación" para por qué no hay un default aplicado sin que el
+	// cliente lo pida.
+	limit := int64(0)
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed < 0 {
+			http.Error(w, "invalid limit parameter", http.StatusBadRequest)
+			return
+		}
+		limit = parsed
+	}
+
+	changes, err := h.store.changesSince(r.Context(), userID, since, limit)
 	if err != nil {
 		if errors.Is(err, errCursorInvalid) {
 			http.Error(w, "cursor is no longer valid, perform a full resync (retry without since)", http.StatusGone)

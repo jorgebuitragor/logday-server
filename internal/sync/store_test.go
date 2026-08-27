@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -53,7 +54,7 @@ func TestChangesSinceReturnsInSeqOrder(t *testing.T) {
 	insertTaskFixture(t, database, "task-1", "user-1", 1, false)
 	insertTaskFixture(t, database, "task-3", "user-1", 3, false)
 
-	changes, err := s.changesSince(ctx, "user-1", 0)
+	changes, err := s.changesSince(ctx, "user-1", 0, 0)
 	if err != nil {
 		t.Fatalf("changesSince: %v", err)
 	}
@@ -74,7 +75,7 @@ func TestChangesSinceFiltersByCursor(t *testing.T) {
 	insertTaskFixture(t, database, "task-1", "user-1", 1, false)
 	insertTaskFixture(t, database, "task-2", "user-1", 2, false)
 
-	changes, err := s.changesSince(ctx, "user-1", 1)
+	changes, err := s.changesSince(ctx, "user-1", 1, 0)
 	if err != nil {
 		t.Fatalf("changesSince: %v", err)
 	}
@@ -89,7 +90,7 @@ func TestChangesSinceSurfacesTombstones(t *testing.T) {
 
 	insertTaskFixture(t, database, "task-1", "user-1", 1, true)
 
-	changes, err := s.changesSince(ctx, "user-1", 0)
+	changes, err := s.changesSince(ctx, "user-1", 0, 0)
 	if err != nil {
 		t.Fatalf("changesSince: %v", err)
 	}
@@ -105,7 +106,7 @@ func TestChangesSinceIsScopedToUser(t *testing.T) {
 	insertTaskFixture(t, database, "task-1", "user-1", 1, false)
 	insertTaskFixture(t, database, "task-2", "user-2", 1, false)
 
-	changes, err := s.changesSince(ctx, "user-1", 0)
+	changes, err := s.changesSince(ctx, "user-1", 0, 0)
 	if err != nil {
 		t.Fatalf("changesSince: %v", err)
 	}
@@ -138,7 +139,7 @@ func TestChangesSinceUsesNaturalKeyAsID(t *testing.T) {
 		t.Fatalf("inserting daily_entries fixture: %v", err)
 	}
 
-	changes, err := s.changesSince(ctx, "user-1", 0)
+	changes, err := s.changesSince(ctx, "user-1", 0, 0)
 	if err != nil {
 		t.Fatalf("changesSince: %v", err)
 	}
@@ -182,11 +183,110 @@ func TestChangesSinceRejectsCursorOlderThanPurgeWatermark(t *testing.T) {
 		t.Fatalf("PurgeTombstones: %v", err)
 	}
 
-	if _, err := s.changesSince(ctx, "user-1", 2); !errors.Is(err, errCursorInvalid) {
+	if _, err := s.changesSince(ctx, "user-1", 2, 0); !errors.Is(err, errCursorInvalid) {
 		t.Fatalf("expected errCursorInvalid for since=2 (below watermark), got %v", err)
 	}
 
-	if _, err := s.changesSince(ctx, "user-1", 5); err != nil {
+	if _, err := s.changesSince(ctx, "user-1", 5, 0); err != nil {
 		t.Fatalf("expected since=5 (at watermark) to succeed, got %v", err)
+	}
+}
+
+// TestChangesSinceLimitTruncatesToOldestFirst covers pagination: a
+// limit smaller than the total change count returns exactly that many,
+// still ordered by seq ascending (page 1 = the oldest undelivered
+// changes) — a client walks forward page by page from its cursor.
+func TestChangesSinceLimitTruncatesToOldestFirst(t *testing.T) {
+	s, database := newTestStore(t)
+	ctx := context.Background()
+
+	insertTaskFixture(t, database, "task-1", "user-1", 1, false)
+	insertTaskFixture(t, database, "task-2", "user-1", 2, false)
+	insertTaskFixture(t, database, "task-3", "user-1", 3, false)
+
+	changes, err := s.changesSince(ctx, "user-1", 0, 2)
+	if err != nil {
+		t.Fatalf("changesSince: %v", err)
+	}
+	if len(changes) != 2 || changes[0].ID != "task-1" || changes[1].ID != "task-2" {
+		t.Fatalf("expected first 2 changes (task-1, task-2), got %+v", changes)
+	}
+}
+
+// TestChangesSinceLimitGreaterThanTotalReturnsEverything covers the
+// case where limit doesn't actually constrain anything — same result
+// as limit=0, no off-by-one truncating the last item.
+func TestChangesSinceLimitGreaterThanTotalReturnsEverything(t *testing.T) {
+	s, database := newTestStore(t)
+	ctx := context.Background()
+
+	insertTaskFixture(t, database, "task-1", "user-1", 1, false)
+	insertTaskFixture(t, database, "task-2", "user-1", 2, false)
+
+	changes, err := s.changesSince(ctx, "user-1", 0, 10)
+	if err != nil {
+		t.Fatalf("changesSince: %v", err)
+	}
+	if len(changes) != 2 {
+		t.Fatalf("expected both changes with a limit above the total, got %d: %+v", len(changes), changes)
+	}
+}
+
+// TestChangesSinceLimitZeroIsUnbounded covers limit=0 (the "absent"
+// value from the handler) behaving identically to not passing a limit
+// at all — no accidental off-by-one truncating everything to nothing.
+func TestChangesSinceLimitZeroIsUnbounded(t *testing.T) {
+	s, database := newTestStore(t)
+	ctx := context.Background()
+
+	insertTaskFixture(t, database, "task-1", "user-1", 1, false)
+	insertTaskFixture(t, database, "task-2", "user-1", 2, false)
+
+	changes, err := s.changesSince(ctx, "user-1", 0, 0)
+	if err != nil {
+		t.Fatalf("changesSince: %v", err)
+	}
+	if len(changes) != 2 {
+		t.Fatalf("expected both changes with limit=0 (unbounded), got %d: %+v", len(changes), changes)
+	}
+}
+
+// TestChangesSincePagingWalksForwardWithoutGapsOrDuplicates covers the
+// real client loop: page with a small limit until a short page comes
+// back, using the last seq of each page as the next since — every
+// change must show up exactly once, in order.
+func TestChangesSincePagingWalksForwardWithoutGapsOrDuplicates(t *testing.T) {
+	s, database := newTestStore(t)
+	ctx := context.Background()
+
+	const total = 7
+	for i := int64(1); i <= total; i++ {
+		insertTaskFixture(t, database, fmt.Sprintf("task-%d", i), "user-1", i, false)
+	}
+
+	var got []string
+	since := int64(0)
+	for {
+		page, err := s.changesSince(ctx, "user-1", since, 3)
+		if err != nil {
+			t.Fatalf("changesSince: %v", err)
+		}
+		for _, c := range page {
+			got = append(got, c.ID)
+		}
+		if len(page) < 3 {
+			break
+		}
+		since = page[len(page)-1].Seq
+	}
+
+	if len(got) != total {
+		t.Fatalf("expected %d changes walking all pages, got %d: %v", total, len(got), got)
+	}
+	for i, id := range got {
+		want := fmt.Sprintf("task-%d", i+1)
+		if id != want {
+			t.Fatalf("got[%d] = %q, want %q (order/dedup broke across pages): %v", i, id, want, got)
+		}
 	}
 }

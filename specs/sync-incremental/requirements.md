@@ -1,8 +1,9 @@
 # Sync incremental — Requirements
 
-Estado: en progreso — pull (`GET /sync/changes`), tiempo real (WS) y
-purga de tombstones con invalidación de cursor implementados;
-paginación y CRDT siguen pendientes.
+Estado: implementado — pull (`GET /sync/changes`, con paginación
+opcional vía `limit`), tiempo real (WS) y purga de tombstones con
+invalidación de cursor implementados. Ver `design.md` para el detalle
+de paginación y de cómo viaja el contenido CRDT.
 
 ## Contexto
 
@@ -58,6 +59,12 @@ en tiempo real.
 - Cada registro devuelto DEBERÁ incluir el tipo de entidad al que
   pertenece, para que el cliente pueda enrutarlo a su almacenamiento
   local correspondiente.
+- El sistema DEBERÁ aceptar un `limit` opcional que acote la cantidad
+  de cambios devueltos en una respuesta — sin él (o `0`), DEBERÁ
+  comportarse exactamente igual que hoy (sin paginar). Un cliente que
+  pida `limit` y reciba una página completa DEBERÁ poder seguir
+  pidiendo la página siguiente con `since` = el `seq` del último
+  elemento recibido, hasta agotar el delta.
 
 ### Deletes / tombstones
 
@@ -98,11 +105,12 @@ en tiempo real.
 
 ## Fuera de este spec (para esta misma feature más adelante)
 
-- Paginación del endpoint de cambios para usuarios con historiales
-  grandes.
-- Forma exacta en la que viajan los updates CRDT (`yrs`) dentro de este
-  protocolo.
 - Estrategia de reconexión del lado del cliente (backoff) — es una
   decisión de cada cliente, no de este servidor; el servidor solo
   garantiza que el mismo mecanismo de reconciliación (`/sync/changes`)
   sirve tanto para reconexión como para el caso en tiempo real.
+
+La forma en que viajan los updates CRDT dentro de `data` (snapshot
+resuelto en `content_state`, no el update binario crudo) ya está
+implementada y documentada en `design.md` — no quedó fuera de este
+spec, solo faltaba escribirlo.
