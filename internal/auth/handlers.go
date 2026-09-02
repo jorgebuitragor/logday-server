@@ -35,12 +35,19 @@ func NewHandler(s *store, jwtSecret []byte) *Handler {
 func (h *Handler) Routes(r chi.Router) {
 	r.Post("/auth/login", h.login)
 	r.Post("/auth/refresh", h.refresh)
+	r.Get("/policy", h.policy)
 
 	r.Group(func(r chi.Router) {
 		r.Use(h.RequireAuth)
 
 		r.Get("/devices", h.listDevices)
 		r.Delete("/devices/{id}", h.revokeDevice)
+
+		r.Post("/policy/accept", h.acceptPolicy)
+		r.Post("/policy/accept-sensitive", h.acceptSensitiveData)
+
+		r.Get("/account/export", h.exportAccount)
+		r.Delete("/account", h.deleteAccount)
 
 		r.Group(func(r chi.Router) {
 			r.Use(h.RequireAdmin)
@@ -53,6 +60,28 @@ type tokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	DeviceID     string `json:"device_id"`
+	// PolicyVersion/PolicyAcceptedVersion: el cliente los compara para
+	// saber si mostrar el gate de consentimiento sin pegarle a GET
+	// /policy aparte en el camino crítico de login (ver
+	// specs/cumplimiento-datos-personales/). AcceptedVersion es nil si
+	// el usuario nunca aceptó nada todavía.
+	PolicyVersion         int  `json:"policy_version"`
+	PolicyAcceptedVersion *int `json:"policy_accepted_version"`
+	// SensitiveDataAccepted: evita que el cliente tenga que pegarle a
+	// otro endpoint solo para saber si ya mostró el aviso de dato
+	// sensible alguna vez.
+	SensitiveDataAccepted bool `json:"sensitive_data_accepted"`
+}
+
+func tokenResponseFor(access, refresh, deviceID string, cfg *settings.Settings, u *user) tokenResponse {
+	return tokenResponse{
+		AccessToken:           access,
+		RefreshToken:          refresh,
+		DeviceID:              deviceID,
+		PolicyVersion:         cfg.PrivacyPolicyVersion,
+		PolicyAcceptedVersion: u.PrivacyAcceptedVersion,
+		SensitiveDataAccepted: u.SensitiveDataAcceptedAt != nil,
+	}
 }
 
 type loginRequest struct {
@@ -130,7 +159,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, tokenResponse{AccessToken: access, RefreshToken: rawRefresh, DeviceID: d.ID})
+	writeJSON(w, http.StatusOK, tokenResponseFor(access, rawRefresh, d.ID, cfg, u))
 }
 
 type refreshRequest struct {
@@ -196,7 +225,7 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, tokenResponse{AccessToken: access, RefreshToken: newRaw, DeviceID: d.ID})
+	writeJSON(w, http.StatusOK, tokenResponseFor(access, newRaw, d.ID, cfg, u))
 }
 
 type deviceResponse struct {
@@ -239,6 +268,109 @@ func (h *Handler) revokeDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── Política de tratamiento de datos ────────────────────────────────
+// Ver specs/cumplimiento-datos-personales/. GET /policy es público a
+// propósito — un cliente necesita poder mostrar el texto antes de que
+// el usuario decida si quiere usar ese servidor, no solo después de
+// loguearse.
+
+type policyResponse struct {
+	Text    string `json:"text"`
+	Version int    `json:"version"`
+}
+
+func (h *Handler) policy(w http.ResponseWriter, r *http.Request) {
+	cfg, err := settings.Get(r.Context(), h.store.db)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, policyResponse{Text: cfg.PrivacyPolicyText, Version: cfg.PrivacyPolicyVersion})
+}
+
+type acceptPolicyRequest struct {
+	Version int `json:"version"`
+}
+
+func (h *Handler) acceptPolicy(w http.ResponseWriter, r *http.Request) {
+	userID, _ := UserIDFromContext(r.Context())
+
+	var req acceptPolicyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.store.acceptPolicy(r.Context(), userID, req.Version); err != nil {
+		if errors.Is(err, errStalePolicyVersion) {
+			http.Error(w, "policy version is out of date, fetch it again", http.StatusConflict)
+			return
+		}
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) acceptSensitiveData(w http.ResponseWriter, r *http.Request) {
+	userID, _ := UserIDFromContext(r.Context())
+
+	if err := h.store.acceptSensitiveData(r.Context(), userID); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── Derechos del titular ─────────────────────────────────────────────
+
+func (h *Handler) exportAccount(w http.ResponseWriter, r *http.Request) {
+	userID, _ := UserIDFromContext(r.Context())
+
+	data, err := h.store.exportUserData(r.Context(), userID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+type deleteAccountRequest struct {
+	Password string `json:"password"`
+}
+
+// deleteAccount exige la contraseña actual en el body (no solo el
+// access token) — mismo criterio que cualquier otra acción
+// irreversible ya en la app (ver specs/cumplimiento-datos-personales/
+// design.md): un access token robado/filtrado no alcanza para borrar
+// una cuenta entera.
+func (h *Handler) deleteAccount(w http.ResponseWriter, r *http.Request) {
+	userID, _ := UserIDFromContext(r.Context())
+
+	var req deleteAccountRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	u, err := h.store.getUserByID(r.Context(), userID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	match, err := security.VerifyPassword(req.Password, u.PasswordHash)
+	if err != nil || !match {
+		http.Error(w, "invalid password", http.StatusUnauthorized)
+		return
+	}
+
+	if err := h.store.deleteUserAccount(r.Context(), userID); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

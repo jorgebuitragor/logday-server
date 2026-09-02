@@ -10,6 +10,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,6 +76,12 @@ func TestGetReturnsMigrationSeededDefaults(t *testing.T) {
 	if s.MaxDevicesPerUser != 0 {
 		t.Fatalf("expected default max devices per user of 0 (unlimited), got %d", s.MaxDevicesPerUser)
 	}
+	if s.PrivacyPolicyVersion != 1 {
+		t.Fatalf("expected default privacy policy version of 1, got %d", s.PrivacyPolicyVersion)
+	}
+	if !strings.Contains(s.PrivacyPolicyText, "PLANTILLA") {
+		t.Fatalf("expected the seeded default to be flagged as a template, got %q", s.PrivacyPolicyText)
+	}
 }
 
 func TestEmailDomainAllowed(t *testing.T) {
@@ -121,6 +128,8 @@ func TestUpdateRoundTrips(t *testing.T) {
 		RefreshTokenTTLDays:         7,
 		PanelSessionTTLHours:        2,
 		MaxDevicesPerUser:           3,
+		PrivacyPolicyText:           "Política de prueba.",
+		PrivacyPolicyVersion:        2,
 	}
 	if err := settings.Update(ctx, database, want); err != nil {
 		t.Fatalf("Update: %v", err)
@@ -139,7 +148,9 @@ func TestUpdateRoundTrips(t *testing.T) {
 		got.AccessTokenTTLMinutes != want.AccessTokenTTLMinutes ||
 		got.RefreshTokenTTLDays != want.RefreshTokenTTLDays ||
 		got.PanelSessionTTLHours != want.PanelSessionTTLHours ||
-		got.MaxDevicesPerUser != want.MaxDevicesPerUser {
+		got.MaxDevicesPerUser != want.MaxDevicesPerUser ||
+		got.PrivacyPolicyText != want.PrivacyPolicyText ||
+		got.PrivacyPolicyVersion != want.PrivacyPolicyVersion {
 		t.Fatalf("Update did not persist: got %+v, want %+v", got, want)
 	}
 	if !got.UpdatedAt.After(before.UpdatedAt) {

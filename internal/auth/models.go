@@ -6,12 +6,15 @@ import (
 )
 
 type user struct {
-	ID           string
-	Email        string
-	PasswordHash string
-	IsAdmin      bool
-	CreatedAt    time.Time
-	DeletedAt    *time.Time
+	ID                      string
+	Email                   string
+	PasswordHash            string
+	IsAdmin                 bool
+	CreatedAt               time.Time
+	DeletedAt               *time.Time
+	PrivacyAcceptedVersion  *int
+	PrivacyAcceptedAt       *time.Time
+	SensitiveDataAcceptedAt *time.Time
 }
 
 type device struct {
