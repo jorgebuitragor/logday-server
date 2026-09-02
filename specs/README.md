@@ -46,3 +46,4 @@ tres archivos:
 | LWW por campo | implementado (sin mergear) | [`lww-por-campo/`](./lww-por-campo/requirements.md) |
 | Web app embebida | implementado (sin mergear) | [`webapp-embebida/`](./webapp-embebida/requirements.md) |
 | Papelera compartida entre servicios | implementado | [`papelera-compartida/`](./papelera-compartida/requirements.md) |
+| CORS configurable | implementado | [`cors-configurable/`](./cors-configurable/requirements.md) |
