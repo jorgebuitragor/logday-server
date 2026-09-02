@@ -79,6 +79,24 @@
       </p>
     </div>
 
+    <h3>Privacidad</h3>
+    <div class="field-group wide">
+      <label>Política de tratamiento de datos personales
+        <textarea name="privacy_policy_text" required maxlength="20000" rows="10">{{.Settings.PrivacyPolicyText}}</textarea>
+      </label>
+      <label>Versión
+        <input type="text" inputmode="numeric" pattern="[0-9]*" name="privacy_policy_version" required value="{{.Settings.PrivacyPolicyVersion}}">
+      </label>
+      <p class="hint">
+        El texto que viene por defecto es una <strong>plantilla</strong>, no un
+        documento legal — reemplázalo por el tuyo antes de usar esta instancia
+        con usuarios reales. Sube la versión manualmente cada vez que cambies
+        el texto de fondo: todo usuario que no haya aceptado esa versión ve el
+        aviso de nuevo en su próximo login. Un typo corregido no amerita subir
+        la versión.
+      </p>
+    </div>
+
     <button type="submit" class="btn btn-primary">{{template "icon-save"}} Guardar cambios</button>
   </form>
 

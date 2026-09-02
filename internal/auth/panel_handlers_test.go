@@ -721,6 +721,8 @@ func TestPanelSettingsPage(t *testing.T) {
 		"refresh_token_ttl_days":          {"7"},
 		"panel_session_ttl_hours":         {"2"},
 		"max_devices_per_user":            {"3"},
+		"privacy_policy_text":             {"Política de prueba."},
+		"privacy_policy_version":          {"2"},
 	})
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusFound || !strings.HasPrefix(resp.Header.Get("Location"), "/admin/panel/settings?success=") {

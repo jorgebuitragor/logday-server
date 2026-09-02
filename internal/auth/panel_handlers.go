@@ -568,6 +568,8 @@ func (h *Handler) panelUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	refreshTTL, refreshTTLErr := strconv.Atoi(r.FormValue("refresh_token_ttl_days"))
 	panelTTL, panelTTLErr := strconv.Atoi(r.FormValue("panel_session_ttl_hours"))
 	maxDevices, maxDevicesErr := strconv.Atoi(r.FormValue("max_devices_per_user"))
+	policyText := strings.TrimSpace(r.FormValue("privacy_policy_text"))
+	policyVersion, policyVersionErr := strconv.Atoi(r.FormValue("privacy_policy_version"))
 
 	switch {
 	case name == "" || len(name) > 60:
@@ -597,6 +599,12 @@ func (h *Handler) panelUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	case maxDevicesErr != nil || maxDevices < 0 || maxDevices > 1000:
 		h.redirectWithError(w, r, "/admin/panel/settings", "el máximo de dispositivos por usuario debe ser un número entre 0 (sin límite) y 1000")
 		return
+	case policyText == "" || len(policyText) > 20000:
+		h.redirectWithError(w, r, "/admin/panel/settings", "el texto de la política debe tener entre 1 y 20000 caracteres")
+		return
+	case policyVersionErr != nil || policyVersion < 1 || policyVersion > 1000000:
+		h.redirectWithError(w, r, "/admin/panel/settings", "la versión de la política debe ser un número entre 1 y 1000000")
+		return
 	}
 
 	err := settings.Update(r.Context(), h.store.db, settings.Settings{
@@ -610,6 +618,8 @@ func (h *Handler) panelUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		RefreshTokenTTLDays:         refreshTTL,
 		PanelSessionTTLHours:        panelTTL,
 		MaxDevicesPerUser:           maxDevices,
+		PrivacyPolicyText:           policyText,
+		PrivacyPolicyVersion:        policyVersion,
 	})
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)

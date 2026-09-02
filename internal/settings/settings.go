@@ -31,6 +31,8 @@ type Settings struct {
 	RefreshTokenTTLDays         int
 	PanelSessionTTLHours        int
 	MaxDevicesPerUser           int // 0 = sin límite
+	PrivacyPolicyText           string
+	PrivacyPolicyVersion        int
 	UpdatedAt                   time.Time
 }
 
@@ -97,12 +99,12 @@ func Get(ctx context.Context, db *sql.DB) (*Settings, error) {
 		SELECT instance_name, tombstone_retention_days, login_rate_limit_attempts,
 		       login_rate_limit_window_seconds, allowed_email_domains, min_password_length,
 		       access_token_ttl_minutes, refresh_token_ttl_days, panel_session_ttl_hours,
-		       max_devices_per_user, updated_at
+		       max_devices_per_user, privacy_policy_text, privacy_policy_version, updated_at
 		FROM instance_settings WHERE id = 1
 	`).Scan(&s.InstanceName, &s.TombstoneRetentionDays, &s.LoginRateLimitAttempts,
 		&s.LoginRateLimitWindowSeconds, &s.AllowedEmailDomains, &s.MinPasswordLength,
 		&s.AccessTokenTTLMinutes, &s.RefreshTokenTTLDays, &s.PanelSessionTTLHours,
-		&s.MaxDevicesPerUser, &updatedAt)
+		&s.MaxDevicesPerUser, &s.PrivacyPolicyText, &s.PrivacyPolicyVersion, &updatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("reading instance settings: %w", err)
 	}
@@ -125,12 +127,12 @@ func Update(ctx context.Context, db *sql.DB, s Settings) error {
 		SET instance_name = ?, tombstone_retention_days = ?, login_rate_limit_attempts = ?,
 		    login_rate_limit_window_seconds = ?, allowed_email_domains = ?, min_password_length = ?,
 		    access_token_ttl_minutes = ?, refresh_token_ttl_days = ?, panel_session_ttl_hours = ?,
-		    max_devices_per_user = ?, updated_at = ?
+		    max_devices_per_user = ?, privacy_policy_text = ?, privacy_policy_version = ?, updated_at = ?
 		WHERE id = 1
 	`, s.InstanceName, s.TombstoneRetentionDays, s.LoginRateLimitAttempts,
 		s.LoginRateLimitWindowSeconds, s.AllowedEmailDomains, s.MinPasswordLength,
 		s.AccessTokenTTLMinutes, s.RefreshTokenTTLDays, s.PanelSessionTTLHours,
-		s.MaxDevicesPerUser, time.Now().UTC().Format(time.RFC3339Nano))
+		s.MaxDevicesPerUser, s.PrivacyPolicyText, s.PrivacyPolicyVersion, time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("updating instance settings: %w", err)
 	}
