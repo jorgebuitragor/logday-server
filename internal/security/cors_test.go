@@ -3,6 +3,7 @@ package security
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -71,8 +72,12 @@ func TestCORSMiddleware_PreflightHandledDirectly(t *testing.T) {
 	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "https://allowed.example" {
 		t.Fatalf("Access-Control-Allow-Origin = %q, want https://allowed.example", got)
 	}
-	if got := rec.Header().Get("Access-Control-Allow-Methods"); got == "" {
-		t.Fatal("expected Access-Control-Allow-Methods to be set")
+	// PUT incluido a propósito: /daily-entries/{date} y otras rutas de
+	// clave natural lo usan (internal/dailyentry/handlers.go) — un
+	// preflight sin PUT bloquearía esas requests del lado navegador
+	// aunque la ruta real sí lo soporte.
+	if got := rec.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(got, "PUT") {
+		t.Fatalf("Access-Control-Allow-Methods = %q, want it to include PUT", got)
 	}
 	if got := rec.Header().Get("Access-Control-Allow-Headers"); got == "" {
 		t.Fatal("expected Access-Control-Allow-Headers to be set")
