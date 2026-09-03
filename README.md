@@ -143,3 +143,10 @@ make fmt     # golangci-lint fmt ./...
 Ver [`specs/convenciones-codigo/`](./specs/convenciones-codigo/requirements.md)
 para la estructura de paquetes y convenciones de código, y
 [`CONTRIBUTING.md`](./CONTRIBUTING.md) para el flujo de ramas (Gitflow).
+
+## Licencia
+
+[AGPL-3.0-or-later](./LICENSE). Software libre: cualquier persona u
+organización puede desplegar su propia instancia. Si ofreces una
+versión modificada como servicio a terceros, el AGPL exige publicar
+también ese código modificado (copyleft de red).

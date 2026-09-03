@@ -12,10 +12,11 @@ import (
 )
 
 var (
-	errNotFound       = errors.New("not found")
-	errDuplicateEmail = errors.New("email already exists")
-	errLastAdmin      = errors.New("cannot remove the last active admin")
-	errAlreadyInit    = errors.New("instance already has an admin")
+	errNotFound           = errors.New("not found")
+	errDuplicateEmail     = errors.New("email already exists")
+	errLastAdmin          = errors.New("cannot remove the last active admin")
+	errAlreadyInit        = errors.New("instance already has an admin")
+	errStalePolicyVersion = errors.New("policy version is stale")
 )
 
 type store struct {
@@ -57,24 +58,29 @@ func (s *store) createUser(ctx context.Context, email, passwordHash string, isAd
 	return u, nil
 }
 
+const userColumns = `id, email, password_hash, is_admin, created_at, deleted_at,
+	privacy_accepted_version, privacy_accepted_at, sensitive_data_accepted_at`
+
 func (s *store) getUserByEmail(ctx context.Context, email string) (*user, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, email, password_hash, is_admin, created_at, deleted_at
+		`SELECT `+userColumns+`
 		 FROM users WHERE email = ? AND deleted_at IS NULL`, email)
 	return scanUser(row)
 }
 
 func (s *store) getUserByID(ctx context.Context, id string) (*user, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, email, password_hash, is_admin, created_at, deleted_at FROM users WHERE id = ?`, id)
+		`SELECT `+userColumns+` FROM users WHERE id = ?`, id)
 	return scanUser(row)
 }
 
 func scanUser(row *sql.Row) (*user, error) {
 	var u user
 	var createdAt string
-	var deletedAt sql.NullString
-	if err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.IsAdmin, &createdAt, &deletedAt); err != nil {
+	var deletedAt, privacyAcceptedAt, sensitiveDataAcceptedAt sql.NullString
+	var privacyAcceptedVersion sql.NullInt64
+	if err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.IsAdmin, &createdAt, &deletedAt,
+		&privacyAcceptedVersion, &privacyAcceptedAt, &sensitiveDataAcceptedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errNotFound
 		}
@@ -91,6 +97,24 @@ func scanUser(row *sql.Row) (*user, error) {
 			return nil, err
 		}
 		u.DeletedAt = &d
+	}
+	if privacyAcceptedVersion.Valid {
+		v := int(privacyAcceptedVersion.Int64)
+		u.PrivacyAcceptedVersion = &v
+	}
+	if privacyAcceptedAt.Valid {
+		t, err := parseTime(privacyAcceptedAt.String)
+		if err != nil {
+			return nil, err
+		}
+		u.PrivacyAcceptedAt = &t
+	}
+	if sensitiveDataAcceptedAt.Valid {
+		t, err := parseTime(sensitiveDataAcceptedAt.String)
+		if err != nil {
+			return nil, err
+		}
+		u.SensitiveDataAcceptedAt = &t
 	}
 	return &u, nil
 }
@@ -534,6 +558,153 @@ func (s *store) createFirstAdmin(ctx context.Context, email, passwordHash string
 		return nil, fmt.Errorf("committing first admin creation: %w", err)
 	}
 	return u, nil
+}
+
+// acceptPolicy records that userID accepted privacy policy version
+// `version` — but only if that's still the instance's current version.
+// A stale version (the admin edited the text between the client
+// fetching it and the user clicking "accept") is rejected with
+// errStalePolicyVersion so nobody ends up marked as having accepted
+// text they never actually saw.
+func (s *store) acceptPolicy(ctx context.Context, userID string, version int) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE users SET privacy_accepted_version = ?, privacy_accepted_at = ?
+		 WHERE id = ? AND ? = (SELECT privacy_policy_version FROM instance_settings WHERE id = 1)`,
+		version, formatTime(time.Now().UTC()), userID, version)
+	if err != nil {
+		return fmt.Errorf("accepting policy: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("accepting policy: %w", err)
+	}
+	if n == 0 {
+		return errStalePolicyVersion
+	}
+	return nil
+}
+
+// acceptSensitiveData records consent for the sensitive-data notice
+// (today: the "incapacidad" absence type) — a single flag, since
+// there's only one sensitive field in the whole schema right now.
+func (s *store) acceptSensitiveData(ctx context.Context, userID string) error {
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE users SET sensitive_data_accepted_at = ? WHERE id = ?`,
+		formatTime(time.Now().UTC()), userID); err != nil {
+		return fmt.Errorf("accepting sensitive data notice: %w", err)
+	}
+	return nil
+}
+
+// domainTables lists every table keyed by user_id that isn't already
+// covered by a foreign key cascade (unlike devices, see
+// 00002_create_devices.sql) — both exportUserData and
+// deleteUserAccount need this list, but exportUserData ALSO dumps
+// "devices" separately below (see its own comment): the cascade that
+// makes devices safe to skip on delete doesn't mean it isn't personal
+// data that belongs in an export.
+var domainTables = []string{
+	"tasks", "notes", "overtime_entries", "overtime_month_meta",
+	"calendar_events", "absence_days", "daily_entries", "user_sync_counters",
+}
+
+// exportUserData dumps every row userID owns, table by table, for the
+// "exportar mis datos" data-subject-rights action
+// (specs/cumplimiento-datos-personales/). Uses SELECT * generically
+// instead of a hand-written struct per table on purpose — this is a
+// one-shot full export, not a hot path, and a generic dump can't drift
+// out of sync with a table's columns the way a hardcoded struct could.
+func (s *store) exportUserData(ctx context.Context, userID string) (map[string]any, error) {
+	out := make(map[string]any, len(domainTables)+1)
+	for _, table := range domainTables {
+		rows, err := dumpTableForUser(ctx, s.db, table, userID)
+		if err != nil {
+			return nil, fmt.Errorf("exporting %s: %w", table, err)
+		}
+		out[table] = rows
+	}
+	// devices isn't in domainTables (see its comment) but device
+	// name/IP/timestamps are still personal data — the data-subject
+	// export needs it even though deleteUserAccount doesn't have to
+	// touch it explicitly.
+	devices, err := dumpTableForUser(ctx, s.db, "devices", userID)
+	if err != nil {
+		return nil, fmt.Errorf("exporting devices: %w", err)
+	}
+	out["devices"] = devices
+	return out, nil
+}
+
+// dumpTableForUser runs `SELECT * FROM <table> WHERE user_id = ?`.
+// table is never attacker-controlled — it only ever comes from the
+// fixed domainTables slice above — so building the query with
+// fmt.Sprintf here is safe despite not being a placeholder.
+func dumpTableForUser(ctx context.Context, db *sql.DB, table, userID string) ([]map[string]any, error) {
+	rows, err := db.QueryContext(ctx, fmt.Sprintf(`SELECT * FROM %s WHERE user_id = ?`, table), userID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]map[string]any, 0)
+	for rows.Next() {
+		values := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range values {
+			ptrs[i] = &values[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		row := make(map[string]any, len(cols))
+		for i, col := range cols {
+			if b, ok := values[i].([]byte); ok {
+				row[col] = string(b)
+			} else {
+				row[col] = values[i]
+			}
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// deleteUserAccount permanently removes userID and everything it
+// owns, for the "eliminar mi cuenta" data-subject-rights action. Every
+// domainTables entry lacks a foreign key (unlike devices), so each is
+// deleted explicitly; used_refresh_tokens is keyed by device_id, not
+// user_id, so it's cleaned up via a subquery before devices disappear.
+// The users row is deleted last so the existing
+// devices.user_id ON DELETE CASCADE handles that table for free.
+//
+// Wrapped in withLastAdminGuard — same as softDeleteUser/updateUserAdmin
+// — so a self-service delete can't leave the instance without any
+// admin (which would silently reopen unauthenticated /setup).
+func (s *store) deleteUserAccount(ctx context.Context, userID string) error {
+	return s.withLastAdminGuard(ctx, userID, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM used_refresh_tokens WHERE device_id IN (SELECT id FROM devices WHERE user_id = ?)`, userID,
+		); err != nil {
+			return fmt.Errorf("deleting used refresh tokens: %w", err)
+		}
+
+		for _, table := range domainTables {
+			if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE user_id = ?`, table), userID); err != nil {
+				return fmt.Errorf("deleting from %s: %w", table, err)
+			}
+		}
+
+		if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
+			return fmt.Errorf("deleting user: %w", err)
+		}
+
+		return nil
+	})
 }
 
 func formatTime(t time.Time) string {

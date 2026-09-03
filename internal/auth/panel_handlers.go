@@ -568,6 +568,21 @@ func (h *Handler) panelUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	refreshTTL, refreshTTLErr := strconv.Atoi(r.FormValue("refresh_token_ttl_days"))
 	panelTTL, panelTTLErr := strconv.Atoi(r.FormValue("panel_session_ttl_hours"))
 	maxDevices, maxDevicesErr := strconv.Atoi(r.FormValue("max_devices_per_user"))
+	policyText := strings.TrimSpace(r.FormValue("privacy_policy_text"))
+	policyVersion, policyVersionErr := strconv.Atoi(r.FormValue("privacy_policy_version"))
+
+	// Un cambio de texto sin subir la versión dejaría a cualquier
+	// usuario cuyo privacy_accepted_version ya coincida con la
+	// guardada sin volver a ver el gate de consentimiento — el texto
+	// nuevo se aplicaría en silencio. current puede ser nil solo si
+	// instance_settings no tiene fila (no debería pasar, hay un
+	// default en la migración), en cuyo caso se salta el chequeo en
+	// vez de bloquear el guardado por un error no relacionado.
+	current, currentErr := settings.Get(r.Context(), h.store.db)
+	if currentErr == nil && current != nil && policyText != current.PrivacyPolicyText && policyVersionErr == nil && policyVersion <= current.PrivacyPolicyVersion {
+		h.redirectWithError(w, r, "/admin/panel/settings", "cambiaste el texto de la política — subí la versión para que los usuarios que ya aceptaron la vean de nuevo")
+		return
+	}
 
 	switch {
 	case name == "" || len(name) > 60:
@@ -597,6 +612,12 @@ func (h *Handler) panelUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	case maxDevicesErr != nil || maxDevices < 0 || maxDevices > 1000:
 		h.redirectWithError(w, r, "/admin/panel/settings", "el máximo de dispositivos por usuario debe ser un número entre 0 (sin límite) y 1000")
 		return
+	case policyText == "" || len(policyText) > 20000:
+		h.redirectWithError(w, r, "/admin/panel/settings", "el texto de la política debe tener entre 1 y 20000 caracteres")
+		return
+	case policyVersionErr != nil || policyVersion < 1 || policyVersion > 1000000:
+		h.redirectWithError(w, r, "/admin/panel/settings", "la versión de la política debe ser un número entre 1 y 1000000")
+		return
 	}
 
 	err := settings.Update(r.Context(), h.store.db, settings.Settings{
@@ -610,6 +631,8 @@ func (h *Handler) panelUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		RefreshTokenTTLDays:         refreshTTL,
 		PanelSessionTTLHours:        panelTTL,
 		MaxDevicesPerUser:           maxDevices,
+		PrivacyPolicyText:           policyText,
+		PrivacyPolicyVersion:        policyVersion,
 	})
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
