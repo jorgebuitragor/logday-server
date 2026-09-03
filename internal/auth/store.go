@@ -599,7 +599,10 @@ func (s *store) acceptSensitiveData(ctx context.Context, userID string) error {
 // domainTables lists every table keyed by user_id that isn't already
 // covered by a foreign key cascade (unlike devices, see
 // 00002_create_devices.sql) — both exportUserData and
-// deleteUserAccount need the exact same list.
+// deleteUserAccount need this list, but exportUserData ALSO dumps
+// "devices" separately below (see its own comment): the cascade that
+// makes devices safe to skip on delete doesn't mean it isn't personal
+// data that belongs in an export.
 var domainTables = []string{
 	"tasks", "notes", "overtime_entries", "overtime_month_meta",
 	"calendar_events", "absence_days", "daily_entries", "user_sync_counters",
@@ -612,7 +615,7 @@ var domainTables = []string{
 // one-shot full export, not a hot path, and a generic dump can't drift
 // out of sync with a table's columns the way a hardcoded struct could.
 func (s *store) exportUserData(ctx context.Context, userID string) (map[string]any, error) {
-	out := make(map[string]any, len(domainTables))
+	out := make(map[string]any, len(domainTables)+1)
 	for _, table := range domainTables {
 		rows, err := dumpTableForUser(ctx, s.db, table, userID)
 		if err != nil {
@@ -620,6 +623,15 @@ func (s *store) exportUserData(ctx context.Context, userID string) (map[string]a
 		}
 		out[table] = rows
 	}
+	// devices isn't in domainTables (see its comment) but device
+	// name/IP/timestamps are still personal data — the data-subject
+	// export needs it even though deleteUserAccount doesn't have to
+	// touch it explicitly.
+	devices, err := dumpTableForUser(ctx, s.db, "devices", userID)
+	if err != nil {
+		return nil, fmt.Errorf("exporting devices: %w", err)
+	}
+	out["devices"] = devices
 	return out, nil
 }
 
@@ -669,30 +681,30 @@ func dumpTableForUser(ctx context.Context, db *sql.DB, table, userID string) ([]
 // user_id, so it's cleaned up via a subquery before devices disappear.
 // The users row is deleted last so the existing
 // devices.user_id ON DELETE CASCADE handles that table for free.
+//
+// Wrapped in withLastAdminGuard — same as softDeleteUser/updateUserAdmin
+// — so a self-service delete can't leave the instance without any
+// admin (which would silently reopen unauthenticated /setup).
 func (s *store) deleteUserAccount(ctx context.Context, userID string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("beginning account deletion: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM used_refresh_tokens WHERE device_id IN (SELECT id FROM devices WHERE user_id = ?)`, userID,
-	); err != nil {
-		return fmt.Errorf("deleting used refresh tokens: %w", err)
-	}
-
-	for _, table := range domainTables {
-		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE user_id = ?`, table), userID); err != nil {
-			return fmt.Errorf("deleting from %s: %w", table, err)
+	return s.withLastAdminGuard(ctx, userID, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM used_refresh_tokens WHERE device_id IN (SELECT id FROM devices WHERE user_id = ?)`, userID,
+		); err != nil {
+			return fmt.Errorf("deleting used refresh tokens: %w", err)
 		}
-	}
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
-		return fmt.Errorf("deleting user: %w", err)
-	}
+		for _, table := range domainTables {
+			if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE user_id = ?`, table), userID); err != nil {
+				return fmt.Errorf("deleting from %s: %w", table, err)
+			}
+		}
 
-	return tx.Commit()
+		if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
+			return fmt.Errorf("deleting user: %w", err)
+		}
+
+		return nil
+	})
 }
 
 func formatTime(t time.Time) string {

@@ -185,6 +185,9 @@ func TestExportAndDeleteAccountEndpoints(t *testing.T) {
 	if _, ok := data["tasks"]; !ok {
 		t.Fatalf("expected a \"tasks\" key in the export, got %v", data)
 	}
+	if _, ok := data["devices"]; !ok {
+		t.Fatalf("expected a \"devices\" key in the export, got %v", data)
+	}
 
 	// Contraseña incorrecta: rechazado, la cuenta sigue viva.
 	badDelete := authedRequest(t, http.MethodDelete, srv.URL+"/account", access, `{"password":"wrong-password"}`)
@@ -193,7 +196,17 @@ func TestExportAndDeleteAccountEndpoints(t *testing.T) {
 		t.Fatalf("DELETE /account with wrong password: expected 401, got %d", badDelete.StatusCode)
 	}
 
-	// Contraseña correcta: la cuenta se borra.
+	// Segundo admin, para que borrar al primero no viole la regla de
+	// "no te quedes sin admin" (ver TestDeleteAccountRejectsLastAdmin
+	// para ese caso).
+	createResp := authedRequest(t, http.MethodPost, srv.URL+"/admin/users", access,
+		`{"email":"admin2@example.com","password":"test-password-123","is_admin":true}`)
+	_ = createResp.Body.Close()
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("creating second admin: expected 201, got %d", createResp.StatusCode)
+	}
+
+	// Contraseña correcta, ya no es el único admin: la cuenta se borra.
 	okDelete := authedRequest(t, http.MethodDelete, srv.URL+"/account", access, `{"password":"test-password-123"}`)
 	_ = okDelete.Body.Close()
 	if okDelete.StatusCode != http.StatusNoContent {
@@ -214,5 +227,33 @@ func TestExportAndDeleteAccountEndpoints(t *testing.T) {
 	_ = loginResp.Body.Close()
 	if loginResp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected login to fail after account deletion, got %d", loginResp.StatusCode)
+	}
+}
+
+// TestDeleteAccountRejectsLastAdmin covers the bug this repo's
+// deleteUserAccount used to have: a sole admin self-deleting via
+// DELETE /account (no other guard rail — the request carries their
+// own correct password) would silently reopen unauthenticated
+// /setup, or leave the instance with zero admins. withLastAdminGuard
+// closes that the same way it already did for the admin-panel's
+// promote/demote/soft-delete paths.
+func TestDeleteAccountRejectsLastAdmin(t *testing.T) {
+	srv, access, _ := setupPolicyTestServer(t)
+
+	resp := authedRequest(t, http.MethodDelete, srv.URL+"/account", access, `{"password":"test-password-123"}`)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("DELETE /account as the only admin: expected 409, got %d", resp.StatusCode)
+	}
+
+	// La cuenta sigue viva: el login original todavía funciona.
+	loginResp, err := http.Post(srv.URL+"/auth/login", "application/json",
+		strings.NewReader(`{"email":"admin@example.com","password":"test-password-123","device_name":"test"}`))
+	if err != nil {
+		t.Fatalf("login after rejected deletion: %v", err)
+	}
+	_ = loginResp.Body.Close()
+	if loginResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected login to still work after rejected deletion, got %d", loginResp.StatusCode)
 	}
 }

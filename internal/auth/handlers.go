@@ -368,6 +368,10 @@ func (h *Handler) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.deleteUserAccount(r.Context(), userID); err != nil {
+		if errors.Is(err, errLastAdmin) {
+			http.Error(w, "cannot delete the only admin account", http.StatusConflict)
+			return
+		}
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}

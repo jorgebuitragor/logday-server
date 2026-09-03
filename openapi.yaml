@@ -88,6 +88,8 @@ tags:
     description: Endpoints sin autenticación para operar la instancia.
   - name: Auth
     description: Login, refresh y gestión de dispositivos/sesiones propias.
+  - name: Privacidad
+    description: Política de tratamiento de datos y derechos del titular (exportar/eliminar mis datos).
   - name: Admin
     description: Endpoints que requieren un usuario con `is_admin = true`.
   - name: Sync
@@ -247,6 +249,121 @@ paths:
               schema:
                 type: string
                 example: device not found
+
+  /policy:
+    get:
+      operationId: getPolicy
+      tags: [Privacidad]
+      summary: Política de tratamiento de datos vigente
+      description: Sin autenticación — un cliente la necesita para mostrarla antes de que el usuario haya iniciado sesión.
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PolicyResponse"
+
+  /policy/accept:
+    post:
+      operationId: acceptPolicy
+      tags: [Privacidad]
+      summary: Acepta la política de tratamiento de datos
+      description: |
+        `version` debe coincidir con la versión vigente (`GET /policy`) al
+        momento de aceptar — si un admin subió la versión mientras tanto,
+        responde `409` y el cliente debe volver a pedir `GET /policy` antes
+        de reintentar.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcceptPolicyRequest"
+      responses:
+        "204":
+          description: Aceptada.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: La versión enviada quedó desactualizada.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: policy version is out of date, fetch it again
+
+  /policy/accept-sensitive:
+    post:
+      operationId: acceptSensitiveData
+      tags: [Privacidad]
+      summary: Acepta el tratamiento de datos sensibles (ej. incapacidad en Ausencias)
+      description: Consentimiento separado del general — se pide la primera vez que el usuario va a guardar un dato sensible (ver `specs/cumplimiento-datos-personales`), no al loguearse.
+      responses:
+        "204":
+          description: Aceptado.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /account/export:
+    get:
+      operationId: exportAccount
+      tags: [Privacidad]
+      summary: Exporta todos los datos del usuario autenticado
+      description: Derecho de acceso del titular — vuelca cada tabla de dominio (tasks, notes, overtime, calendar, absences, daily entries) más `devices` (nombre/IP/timestamps de sesiones), todo filtrado por el usuario autenticado.
+      responses:
+        "200":
+          description: OK. Forma libre (un objeto por tabla, cada uno un array de filas) — no tiene un schema fijo, refleja las columnas reales de cada tabla.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /account:
+    delete:
+      operationId: deleteAccount
+      tags: [Privacidad]
+      summary: Elimina permanentemente la cuenta del usuario autenticado
+      description: |
+        Exige la contraseña actual en el body (no alcanza con el access
+        token) — mismo criterio que cualquier otra acción irreversible.
+        Borra en cascada todas las tablas de dominio, dispositivos y
+        refresh tokens.
+
+        Rechaza con `409` si el usuario es el único admin activo de la
+        instancia (mismo guard que degradar/dar de baja al último admin
+        desde el panel) — evitar que la instancia se quede sin ningún
+        admin, o que se reabra `/setup` sin autenticación.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteAccountRequest"
+      responses:
+        "204":
+          description: Cuenta eliminada.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Falta el header `Authorization`, o la contraseña enviada es incorrecta.
+          content:
+            text/plain:
+              schema:
+                type: string
+        "409":
+          description: El usuario es el único admin activo de la instancia.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: cannot delete the only admin account
 
   /admin/users:
     post:
@@ -1177,6 +1294,41 @@ components:
           description: Token opaco de larga duración. Guardar de forma segura — reemplaza al anterior en cada `/auth/refresh`.
         device_id:
           type: string
+        policy_version:
+          type: integer
+          description: Versión vigente de la política de tratamiento de datos, para comparar contra `policy_accepted_version` sin un round-trip extra a `GET /policy`.
+        policy_accepted_version:
+          type: integer
+          nullable: true
+          description: Última versión que este usuario aceptó, o `null` si nunca aceptó ninguna. Si es distinta de `policy_version`, el cliente debe mostrar el gate de consentimiento.
+        sensitive_data_accepted:
+          type: boolean
+          description: Si el usuario ya aceptó el consentimiento de datos sensibles (ver `POST /policy/accept-sensitive`).
+
+    PolicyResponse:
+      type: object
+      properties:
+        text:
+          type: string
+          description: Texto completo de la política vigente.
+        version:
+          type: integer
+
+    AcceptPolicyRequest:
+      type: object
+      required: [version]
+      properties:
+        version:
+          type: integer
+          description: Versión que el usuario está aceptando — debe coincidir con la vigente.
+
+    DeleteAccountRequest:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+          format: password
 
     Device:
       type: object
