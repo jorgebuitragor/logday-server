@@ -98,6 +98,20 @@ Ver [`specs/panel-admin/`](./specs/panel-admin/requirements.md) para el
 detalle de diseño (por qué la sesión del panel es una cookie propia y no
 reusa el modelo de tokens de los clientes de sync, CSRF, etc.).
 
+**Recomendación para producción**: el panel (`/admin/panel/*`) es la
+única parte del servidor pensada para uso humano por navegador — a
+diferencia de la API de sync (`/auth`, `/tasks`, `/sync/changes`, `/ws`,
+etc.), que consumen los clientes de Logday (desktop, web, móvil) y no
+puede quedar detrás de un login interactivo. Si tu proxy o CDN soporta
+reglas de acceso por path (por ejemplo Cloudflare Access, un
+`forward_auth` de Traefik, o `auth_request` de nginx con un proveedor
+SSO), agregá esa capa **solo sobre `/admin/panel/*`** como segundo
+factor delante del login propio del panel, y dejá el resto del dominio
+sin esa capa para no romper a los clientes de sync. Es el mismo patrón
+de "seguridad en profundidad" recomendado para cualquier dashboard
+administrativo self-hosted (Coolify, Vaultwarden, etc.): auth de la
+app + auth del borde, en dos capas independientes.
+
 ## Reverse proxy y TLS
 
 El servidor sirve HTTP plano a propósito — no maneja certificados ni
