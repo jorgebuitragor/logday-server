@@ -785,3 +785,68 @@ func TestPanelSettingsPage(t *testing.T) {
 		t.Fatalf("expected the generated secret field to render, got:\n%s", genBody)
 	}
 }
+
+// TestPanelSettingsRequiresPolicyVersionBumpOnTextChange covers a gap
+// found in review: without this, an admin could edit the policy text
+// and leave the version unchanged, so any user whose
+// privacy_accepted_version already matched would silently never see
+// the new text — the whole point of versioning the policy.
+func TestPanelSettingsRequiresPolicyVersionBumpOnTextChange(t *testing.T) {
+	srv, _, authStore := setupPanelServer(t)
+	mustCreatePanelAdmin(t, authStore, "admin@example.com", "correct-horse-battery")
+
+	client := newPanelClient(t)
+	loginToPanel(t, client, srv, "admin@example.com", "correct-horse-battery")
+
+	csrfFor := func(path string) string {
+		body, _ := getAndScrapeCSRF(t, client, srv, path)
+		return scrapeCSRF(t, body)
+	}
+
+	baseForm := func(policyText, policyVersion string) url.Values {
+		return url.Values{
+			"csrf_token":                      {csrfFor("/admin/panel/settings")},
+			"instance_name":                   {"Test"},
+			"tombstone_retention_days":        {"90"},
+			"login_rate_limit_attempts":       {"5"},
+			"login_rate_limit_window_seconds": {"60"},
+			"allowed_email_domains":           {""},
+			"min_password_length":             {"8"},
+			"access_token_ttl_minutes":        {"15"},
+			"refresh_token_ttl_days":          {"30"},
+			"panel_session_ttl_hours":         {"24"},
+			"max_devices_per_user":            {"0"},
+			"privacy_policy_text":             {policyText},
+			"privacy_policy_version":          {policyVersion},
+		}
+	}
+
+	// Setea una versión base real (2), con texto distinto al default
+	// sembrado por la migración, para tener algo que comparar después.
+	setup := postForm(t, client, srv, "/admin/panel/settings", baseForm("Texto v2.", "2"))
+	_ = setup.Body.Close()
+	if !strings.Contains(setup.Header.Get("Location"), "success=") {
+		t.Fatalf("seeding version 2: expected success redirect, got Location=%q", setup.Header.Get("Location"))
+	}
+
+	// Mismo texto, misma versión: no es un cambio real, se acepta.
+	sameText := postForm(t, client, srv, "/admin/panel/settings", baseForm("Texto v2.", "2"))
+	_ = sameText.Body.Close()
+	if !strings.Contains(sameText.Header.Get("Location"), "success=") {
+		t.Fatalf("resubmitting unchanged text/version: expected success redirect, got Location=%q", sameText.Header.Get("Location"))
+	}
+
+	// Texto distinto, versión igual o menor: rechazado.
+	sameVersion := postForm(t, client, srv, "/admin/panel/settings", baseForm("Texto v3, cambiado.", "2"))
+	_ = sameVersion.Body.Close()
+	if !strings.Contains(sameVersion.Header.Get("Location"), "error=") {
+		t.Fatalf("changing text without bumping version: expected error redirect, got Location=%q", sameVersion.Header.Get("Location"))
+	}
+
+	// Texto distinto, versión mayor: aceptado.
+	bumped := postForm(t, client, srv, "/admin/panel/settings", baseForm("Texto v3, cambiado.", "3"))
+	_ = bumped.Body.Close()
+	if !strings.Contains(bumped.Header.Get("Location"), "success=") {
+		t.Fatalf("changing text with a bumped version: expected success redirect, got Location=%q", bumped.Header.Get("Location"))
+	}
+}
