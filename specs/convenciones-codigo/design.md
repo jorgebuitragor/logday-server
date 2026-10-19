@@ -227,10 +227,13 @@ se loguean los `500` (ver abajo).
 `switch { case errors.Is(err, errNotFound): ...404; case
 errors.Is(err, errForbidden): ...403; default: httperr.Internal(w, r,
 err) }` — ver `internal/task/handlers.go` como referencia.
-`httperr.Internal` (`internal/httperr`) loguea `<método> <ruta>: <err>`
+`httperr.Internal` (`internal/httperr`) loguea `"<método>" "<ruta>": <err>`
 con `log` estándar y responde `500 "internal error"`. El cliente nunca
 ve el error real (evita filtrar detalle de implementación/queries SQL),
-y la ruta va sin query string. Un `500` nuevo usa siempre
+y la ruta va sin query string. Método y ruta van citados con
+`strconv.Quote` porque los controla el cliente: un `%0A` en la ruta
+llega decodificado como salto de línea y, sin escapar, falsificaría
+una línea del log (gosec G706). Un `500` nuevo usa siempre
 `httperr.Internal`, nunca `http.Error` a mano. Un
 error de negocio nuevo en un dominio nuevo sigue este mismo patrón de
 tres niveles, no inventa uno propio.
