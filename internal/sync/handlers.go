@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/jorgebuitragor/logday-server/internal/auth"
+	"github.com/jorgebuitragor/logday-server/internal/httperr"
 )
 
 // Handler exposes the unified sync-changes endpoint, protected by
@@ -63,7 +64,7 @@ func (h *Handler) changes(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "cursor is no longer valid, perform a full resync (retry without since)", http.StatusGone)
 			return
 		}
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/jorgebuitragor/logday-server/internal/auth"
 	"github.com/jorgebuitragor/logday-server/internal/db"
+	"github.com/jorgebuitragor/logday-server/internal/httperr"
 	"github.com/jorgebuitragor/logday-server/internal/realtime"
 )
 
@@ -171,7 +172,7 @@ func (h *Handler) patchEntry(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, errForbidden):
 			http.Error(w, "overtime entry belongs to another user", http.StatusForbidden)
 		default:
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			httperr.Internal(w, r, err)
 		}
 		return
 	}
@@ -190,7 +191,7 @@ func (h *Handler) upsertEntry(w http.ResponseWriter, r *http.Request, e *Entry) 
 		case errors.Is(err, errConflict):
 			http.Error(w, "a newer version of this overtime entry already exists", http.StatusConflict)
 		default:
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			httperr.Internal(w, r, err)
 		}
 		return
 	}
@@ -210,7 +211,7 @@ func (h *Handler) deleteEntry(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, errForbidden):
 			http.Error(w, "overtime entry belongs to another user", http.StatusForbidden)
 		default:
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			httperr.Internal(w, r, err)
 		}
 		return
 	}
@@ -223,7 +224,7 @@ func (h *Handler) listEntries(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := h.store.listEntries(r.Context(), userID)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	if entries == nil {
@@ -262,7 +263,7 @@ func (h *Handler) patchMonthMeta(w http.ResponseWriter, r *http.Request) {
 
 	stored, changed, err := h.store.patchMonthMeta(r.Context(), userID, yearMonth, patch, updatedAt.Value)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	if changed {
@@ -281,7 +282,7 @@ func (h *Handler) deleteMonthMeta(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "month metadata not found", http.StatusNotFound)
 			return
 		}
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	h.realtime.Notify(userID, "overtime_month_meta", yearMonth, seq)
@@ -293,7 +294,7 @@ func (h *Handler) listMonthMeta(w http.ResponseWriter, r *http.Request) {
 
 	records, err := h.store.listMonthMeta(r.Context(), userID)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	if records == nil {

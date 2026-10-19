@@ -196,7 +196,8 @@ vida en `cmd/server/main.go` (arranque, migraciones, bootstrap del
 admin, purga de tombstones) y unos pocos "loguear y seguir" donde un
 fallo no debe romper la response completa (`internal/auth/helpers.go`
 al renderizar un template, `internal/auth/ratelimit.go` al leer config
-opcional). No hay logging por request en el hot path de la API.
+opcional). No hay logging por request en el hot path de la API: solo
+se loguean los `500` (ver abajo).
 
 **Tres niveles de error, cada uno con su propia forma**:
 
@@ -224,17 +225,20 @@ opcional). No hay logging por request en el hot path de la API.
 
 **Mapeo a HTTP, siempre en el handler, nunca en el store**: un
 `switch { case errors.Is(err, errNotFound): ...404; case
-errors.Is(err, errForbidden): ...403; default: http.Error(w,
-"internal error", 500) }` — ver `internal/task/handlers.go` como
-referencia. El `default` nunca expone el error interno real al
-cliente (evita filtrar detalle de implementación/queries SQL). Un
+errors.Is(err, errForbidden): ...403; default: httperr.Internal(w, r,
+err) }` — ver `internal/task/handlers.go` como referencia.
+`httperr.Internal` (`internal/httperr`) loguea `<método> <ruta>: <err>`
+con `log` estándar y responde `500 "internal error"`. El cliente nunca
+ve el error real (evita filtrar detalle de implementación/queries SQL),
+y la ruta va sin query string. Un `500` nuevo usa siempre
+`httperr.Internal`, nunca `http.Error` a mano. Un
 error de negocio nuevo en un dominio nuevo sigue este mismo patrón de
 tres niveles, no inventa uno propio.
 
-**Hueco conocido, no resuelto acá**: el `default` de cada `switch` no
-loguea el error real antes de devolver `500` — hoy un fallo
-inesperado (ej. la base de datos caída a mitad de un write) es
-invisible del lado servidor, solo lo nota el cliente por el status
-code. Documentado como gap real, no como parte de la convención — si
-se agrega, tiene que ser consistente en los 9 dominios a la vez, no
-parche por parche.
+**Hueco cerrado el 19 oct 2026**: hasta entonces, el `default` de cada
+`switch` respondía `500` sin loguear el error real. El 500 por
+escrituras concurrentes de SQLite (ver `specs/esquema-datos/design.md`,
+"Conexión y escrituras concurrentes") solo se pudo diagnosticar con la
+traza de red del cliente. Se cambiaron los 75 `http.Error(w, "internal
+error", ...)` de los 8 paquetes que responden 500 (`realtime` no tiene) a `httperr.Internal` de una vez, como
+pedía esta convención, no parche por parche.

@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/jorgebuitragor/logday-server/internal/auth"
+	"github.com/jorgebuitragor/logday-server/internal/httperr"
 	"github.com/jorgebuitragor/logday-server/internal/realtime"
 )
 
@@ -72,7 +73,7 @@ func (h *Handler) put(w http.ResponseWriter, r *http.Request) {
 
 	stored, err := h.store.applyContentUpdate(r.Context(), userID, date, update, req.UpdatedAt)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	h.realtime.Notify(stored.UserID, "daily_entry", stored.Date, stored.Seq)
@@ -89,7 +90,7 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "daily entry not found", http.StatusNotFound)
 			return
 		}
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	h.realtime.Notify(userID, "daily_entry", date, seq)
@@ -101,7 +102,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := h.store.listEntries(r.Context(), userID)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	if entries == nil {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/jorgebuitragor/logday-server/internal/auth"
 	"github.com/jorgebuitragor/logday-server/internal/db"
+	"github.com/jorgebuitragor/logday-server/internal/httperr"
 	"github.com/jorgebuitragor/logday-server/internal/realtime"
 )
 
@@ -147,7 +148,7 @@ func (h *Handler) patch(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, errForbidden):
 			http.Error(w, "absence day belongs to another user", http.StatusForbidden)
 		default:
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			httperr.Internal(w, r, err)
 		}
 		return
 	}
@@ -166,7 +167,7 @@ func (h *Handler) upsert(w http.ResponseWriter, r *http.Request, d *Day) {
 		case errors.Is(err, errConflict):
 			http.Error(w, "a newer version of this absence day already exists", http.StatusConflict)
 		default:
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			httperr.Internal(w, r, err)
 		}
 		return
 	}
@@ -186,7 +187,7 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, errForbidden):
 			http.Error(w, "absence day belongs to another user", http.StatusForbidden)
 		default:
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			httperr.Internal(w, r, err)
 		}
 		return
 	}
@@ -199,7 +200,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 
 	days, err := h.store.listDays(r.Context(), userID)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	if days == nil {

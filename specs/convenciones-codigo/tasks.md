@@ -37,3 +37,9 @@ Estado: implementado
       desde `validate<X>Request`, distinto de los centinelas. Ver
       `design.md`. Gap real documentado (no resuelto): el `default`
       de cada mapeo no loguea el error antes del `500`.
+- [x] Loguear el error real de cada `500` (19 oct 2026):
+      `internal/httperr.Internal` y los 75 sitios de los 8 paquetes que responden 500
+      cambiados a la vez. Cada sitio está dentro de un `if err != nil`,
+      así que se loguea el error que causó el 500. Test en
+      `internal/httperr`: loguea método, ruta y error, y no filtra el
+      error al cliente ni la query string al log.
