@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/jorgebuitragor/logday-server/internal/httperr"
 	"github.com/jorgebuitragor/logday-server/internal/security"
 	"github.com/jorgebuitragor/logday-server/internal/settings"
 )
@@ -120,14 +121,14 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 
 	cfg, err := settings.Get(r.Context(), h.store.db)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
 	if cfg.MaxDevicesPerUser > 0 {
 		count, err := h.store.countDevices(r.Context(), u.ID)
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			httperr.Internal(w, r, err)
 			return
 		}
 		if count >= cfg.MaxDevicesPerUser {
@@ -143,19 +144,19 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 
 	rawRefresh, refreshHash, err := security.GenerateOpaqueToken()
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
 	d, err := h.store.createDevice(r.Context(), u.ID, deviceName, refreshHash, time.Now().Add(cfg.RefreshTokenTTL()), clientIP(r), r.UserAgent())
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
 	access, err := issueAccessToken(h.jwtSecret, u.ID, d.ID, u.IsAdmin, cfg.AccessTokenTTL())
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
@@ -204,24 +205,24 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 
 	cfg, err := settings.Get(r.Context(), h.store.db)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
 	newRaw, newHash, err := security.GenerateOpaqueToken()
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
 	if err := h.store.rotateRefreshToken(r.Context(), d.ID, hash, newHash, time.Now().Add(cfg.RefreshTokenTTL()), cfg.RefreshTokenTTL(), clientIP(r), r.UserAgent()); err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
 	access, err := issueAccessToken(h.jwtSecret, u.ID, d.ID, u.IsAdmin, cfg.AccessTokenTTL())
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
@@ -244,7 +245,7 @@ func (h *Handler) listDevices(w http.ResponseWriter, r *http.Request) {
 
 	devices, err := h.store.listDevices(r.Context(), userID)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
@@ -264,7 +265,7 @@ func (h *Handler) revokeDevice(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "device not found", http.StatusNotFound)
 			return
 		}
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
@@ -285,7 +286,7 @@ type policyResponse struct {
 func (h *Handler) policy(w http.ResponseWriter, r *http.Request) {
 	cfg, err := settings.Get(r.Context(), h.store.db)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, policyResponse{Text: cfg.PrivacyPolicyText, Version: cfg.PrivacyPolicyVersion})
@@ -309,7 +310,7 @@ func (h *Handler) acceptPolicy(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "policy version is out of date, fetch it again", http.StatusConflict)
 			return
 		}
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -319,7 +320,7 @@ func (h *Handler) acceptSensitiveData(w http.ResponseWriter, r *http.Request) {
 	userID, _ := UserIDFromContext(r.Context())
 
 	if err := h.store.acceptSensitiveData(r.Context(), userID); err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -332,7 +333,7 @@ func (h *Handler) exportAccount(w http.ResponseWriter, r *http.Request) {
 
 	data, err := h.store.exportUserData(r.Context(), userID)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, data)
@@ -358,7 +359,7 @@ func (h *Handler) deleteAccount(w http.ResponseWriter, r *http.Request) {
 
 	u, err := h.store.getUserByID(r.Context(), userID)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	match, err := security.VerifyPassword(req.Password, u.PasswordHash)
@@ -372,7 +373,7 @@ func (h *Handler) deleteAccount(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "cannot delete the only admin account", http.StatusConflict)
 			return
 		}
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -408,7 +409,7 @@ func (h *Handler) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	cfg, err := settings.Get(r.Context(), h.store.db)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	if len(req.Password) < cfg.MinPasswordLength {
@@ -422,7 +423,7 @@ func (h *Handler) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	hash, err := security.HashPassword(req.Password)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
@@ -432,7 +433,7 @@ func (h *Handler) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "email already exists", http.StatusConflict)
 			return
 		}
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 

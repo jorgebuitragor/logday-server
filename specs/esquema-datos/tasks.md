@@ -56,3 +56,9 @@ validadas end-to-end.
       `content_crdt BLOB` en ambas tablas. Validado end-to-end contra
       un contenedor real: dos ediciones concurrentes offline al mismo
       texto se mezclan correctamente en ambas entidades.
+- [x] Escrituras concurrentes sin `SQLITE_BUSY` (19 oct 2026):
+      `_txlock=immediate` + `_busy_timeout=5000` en `internal/db/db.go`.
+      Tests: `TestConcurrentReadThenWriteTransactions` (`internal/db`) y
+      `TestConcurrentCreateAndContentUpdate` (`internal/note`). Los dos
+      fallan sin el cambio. Ver `design.md`, "Conexión y escrituras
+      concurrentes".
