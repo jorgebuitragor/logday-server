@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -117,5 +118,54 @@ func TestApplyContentUpdateNotFound(t *testing.T) {
 	_, err := s.applyContentUpdate(ctx, "does-not-exist", "user-1", update, time.Now())
 	if !errors.Is(err, errNotFound) {
 		t.Fatalf("expected errNotFound, got %v", err)
+	}
+}
+
+// Regresión: crear una nota mientras se mezcla el contenido de otra (lo
+// que hace Logday Web al pulsar "Nueva" con texto sin guardar) devolvía
+// 500 cuando las dos transacciones chocaban: "database is locked". Ver
+// TestConcurrentReadThenWriteTransactions en internal/db.
+func TestConcurrentCreateAndContentUpdate(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if _, err := s.upsertNote(ctx, sampleNote("user-1", time.Now())); err != nil {
+		t.Fatalf("upsertNote: %v", err)
+	}
+
+	const rounds = 30
+	errs := make(chan error, 2*rounds)
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < rounds; i++ {
+			_, err := s.applyContentUpdate(ctx, "note-1", "user-1", encodeInsert(t, nil, "x", 0), time.Now())
+			errs <- err
+		}
+		done <- struct{}{}
+	}()
+	go func() {
+		for i := 0; i < rounds; i++ {
+			n := sampleNote("user-1", time.Now())
+			n.ID = fmt.Sprintf("note-new-%d", i)
+			_, err := s.upsertNote(ctx, n)
+			errs <- err
+		}
+		done <- struct{}{}
+	}()
+	<-done
+	<-done
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent write failed: %v", err)
+		}
+	}
+	notes, err := s.listNotes(ctx, "user-1")
+	if err != nil {
+		t.Fatalf("listNotes: %v", err)
+	}
+	if len(notes) != rounds+1 {
+		t.Fatalf("got %d notes, want %d", len(notes), rounds+1)
 	}
 }
