@@ -49,6 +49,19 @@ pestañas (Web Locks, ver `specs/sesion-cookie/` en `logday-web`). El
 servidor no agrega un período de gracia: aceptar un token ya usado
 debilitaría justo la detección de robo.
 
+**Bug encontrado al validar (19 oct 2026), anterior a este cambio.**
+El control negativo del e2e de pestañas (desactivar el Web Lock)
+reprodujo dos refresh simultáneos con el mismo token. El segundo no se
+trataba como reuso: respondía **500** (`UNIQUE constraint failed:
+used_refresh_tokens.token_hash`) y no revocaba el dispositivo. El
+handler lee el dispositivo fuera de la transacción de rotación, así que
+los dos pedidos pasaban esa lectura. Corregido con un compare-and-swap:
+el `UPDATE devices … WHERE refresh_token_hash = <viejo>` de
+`rotateRefreshToken` no afecta filas si otro ya rotó, y eso vuelve como
+`errRefreshTokenReused`, que el handler trata igual que un token ya
+usado (revoca el device y responde 401). Afectaba también a Desktop y
+Mobile.
+
 ## Migración
 
 Un navegador que ya tenía el refresh token en `localStorage` lo manda

@@ -21,6 +21,7 @@ Estado: implementado.
 ## Tests
 
 - [x] `internal/auth/session_cookie_test.go`: login en modo cookie sin token en el body y con los atributos de la cookie; login en modo body sin cambios; refresh rota la cookie; la cookie se ignora sin la cabecera; sin cookie es 401; migración desde un token en el body; reuso revoca y borra la cookie; logout revoca, borra y es idempotente; logout en modo body; `Secure` detrás de un proxy HTTPS.
+- [x] `TestRotateRefreshTokenTwiceWithTheSameOldHashIsReuse` (store) y `TestConcurrentRefreshWithTheSameTokenIsReuse` (HTTP): una rotación que pierde la carrera es reuso, nunca 500.
 - [x] Validación en vivo con `logday-web` embebido (ver el spec del lado Web).
 
 ## Pendiente

@@ -236,6 +236,13 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.rotateRefreshToken(r.Context(), d.ID, hash, newHash, time.Now().Add(cfg.RefreshTokenTTL()), cfg.RefreshTokenTTL(), clientIP(r), r.UserAgent()); err != nil {
+		if errors.Is(err, errRefreshTokenReused) {
+			// Lost a race against another refresh with the same token:
+			// treated exactly like presenting an already-rotated one.
+			_ = h.store.deleteDevice(r.Context(), d.ID)
+			unauthorized("invalid refresh token")
+			return
+		}
 		httperr.Internal(w, r, err)
 		return
 	}

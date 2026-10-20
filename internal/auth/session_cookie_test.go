@@ -249,3 +249,60 @@ func TestCookieIsSecureBehindAnHTTPSProxy(t *testing.T) {
 		t.Fatalf("cookie should be Secure when the proxy says HTTPS")
 	}
 }
+
+// Two refreshes racing with the same token (two tabs, or an attacker
+// racing the real client): exactly one wins, the rest get 401 — never
+// a 500 — and, as with any reuse, the device ends up revoked.
+func TestConcurrentRefreshWithTheSameTokenIsReuse(t *testing.T) {
+	srv, _, _ := setupPolicyTestServer(t)
+	_, tok := postAuth(t, newBrowser(t), srv, "/auth/login", testAdminLogin, false, nil)
+
+	const n = 5
+	type result struct {
+		status int
+		token  string
+	}
+	results := make(chan result, n)
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		go func() {
+			<-start
+			req, _ := http.NewRequest(http.MethodPost, srv.URL+"/auth/refresh", strings.NewReader(`{"refresh_token":"`+tok.RefreshToken+`"}`))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				results <- result{status: -1}
+				return
+			}
+			defer func() { _ = resp.Body.Close() }()
+			var body tokenResponse
+			if resp.StatusCode == http.StatusOK {
+				_ = json.NewDecoder(resp.Body).Decode(&body)
+			}
+			results <- result{status: resp.StatusCode, token: body.RefreshToken}
+		}()
+	}
+	close(start)
+
+	var ok, unauthorized int
+	var winner string
+	for i := 0; i < n; i++ {
+		r := <-results
+		switch r.status {
+		case http.StatusOK:
+			ok++
+			winner = r.token
+		case http.StatusUnauthorized:
+			unauthorized++
+		default:
+			t.Fatalf("concurrent refresh answered %d, want only 200 or 401", r.status)
+		}
+	}
+	if ok != 1 || unauthorized != n-1 {
+		t.Fatalf("got %d OK and %d 401, want exactly 1 OK", ok, unauthorized)
+	}
+	resp, _ := postAuth(t, newBrowser(t), srv, "/auth/refresh", `{"refresh_token":"`+winner+`"}`, false, nil)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("after a reuse race the device should be revoked, winner's token got %d", resp.StatusCode)
+	}
+}

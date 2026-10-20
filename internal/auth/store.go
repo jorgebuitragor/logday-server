@@ -17,6 +17,11 @@ var (
 	errLastAdmin          = errors.New("cannot remove the last active admin")
 	errAlreadyInit        = errors.New("instance already has an admin")
 	errStalePolicyVersion = errors.New("policy version is stale")
+	// errRefreshTokenReused: the refresh token was valid when the
+	// request read the device, but another rotation consumed it first
+	// (two refreshes racing with the same token). Same meaning as
+	// presenting an already-rotated token: the handler revokes the device.
+	errRefreshTokenReused = errors.New("refresh token already rotated")
 )
 
 type store struct {
@@ -190,18 +195,31 @@ func (s *store) rotateRefreshToken(ctx context.Context, deviceID, oldHash, newHa
 
 	now := time.Now().UTC()
 
+	// Compare-and-swap on the current hash: the caller read the device
+	// outside this transaction, so a concurrent refresh with the same
+	// token may have rotated it in between. Transactions are BEGIN
+	// IMMEDIATE (internal/db), so the second one sees the new hash,
+	// updates nothing and is reported as reuse — before, it went on to
+	// insert into used_refresh_tokens, hit the UNIQUE constraint and
+	// answered 500 without revoking anything.
+	res, err := tx.ExecContext(ctx,
+		`UPDATE devices SET refresh_token_hash = ?, refresh_token_expires_at = ?, last_used_at = ?, last_ip = ?, user_agent = ? WHERE id = ? AND refresh_token_hash = ?`,
+		newHash, formatTime(newExpiresAt), formatTime(now), ip, userAgent, deviceID, oldHash,
+	)
+	if err != nil {
+		return fmt.Errorf("updating device: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("checking device update: %w", err)
+	} else if n == 0 {
+		return errRefreshTokenReused
+	}
+
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO used_refresh_tokens (token_hash, device_id, used_at) VALUES (?, ?, ?)`,
 		oldHash, deviceID, formatTime(now),
 	); err != nil {
 		return fmt.Errorf("recording used refresh token: %w", err)
-	}
-
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE devices SET refresh_token_hash = ?, refresh_token_expires_at = ?, last_used_at = ?, last_ip = ?, user_agent = ? WHERE id = ?`,
-		newHash, formatTime(newExpiresAt), formatTime(now), ip, userAgent, deviceID,
-	); err != nil {
-		return fmt.Errorf("updating device: %w", err)
 	}
 
 	cutoff := formatTime(now.Add(-refreshTTL - 24*time.Hour))
