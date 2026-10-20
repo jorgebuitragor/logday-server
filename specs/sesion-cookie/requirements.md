@@ -23,17 +23,23 @@ cambian: el modo cookie es opt-in por cabecera.
 
 - Cuando `/auth/login` o `/auth/refresh` reciba la cabecera
   `X-Logday-Session: cookie`, el sistema DEBERÁ entregar el refresh
-  token en la cookie `logday_refresh` (`HttpOnly`, `SameSite=Strict`,
-  `Path=/auth`, `Max-Age` igual al TTL del refresh token) y DEBERÁ
+  token en una cookie `HttpOnly`, `SameSite=Strict` y con `Max-Age`
+  igual al TTL del refresh token (`__Host-logday_refresh` con `Path=/`
+  por HTTPS; `logday_refresh` con `Path=/auth` por HTTP plano), y DEBERÁ
   devolver `refresh_token` vacío en el JSON.
 - La cookie DEBERÁ llevar `Secure` cuando el pedido llegue por HTTPS,
   directo (`r.TLS`) o a través del reverse proxy
   (`X-Forwarded-Proto: https`), y NO DEBERÁ llevarlo por HTTP plano
   (instancias en LAN).
 - En modo cookie, `/auth/refresh` DEBERÁ aceptar un body vacío y tomar
-  el token de la cookie. Si el body trae `refresh_token`, ese DEBERÁ
-  tener prioridad (migración de un navegador que lo tenía en
-  `localStorage`).
+  el token de la cookie. Si no hay cookie y el body trae
+  `refresh_token`, DEBERÁ usarlo (migración de un navegador que lo tenía
+  en `localStorage`). Si hay cookie, la cookie DEBERÁ ganar.
+- Si llegan dos cookies de sesión con el mismo nombre, el sistema
+  DEBERÁ tratar el pedido como sin sesión.
+- Durante 20 s después de rotar un refresh token, presentarlo de nuevo
+  DEBERÁ rotar el token vigente del device en vez de revocarlo; pasado
+  ese margen, DEBERÁ revocar como antes.
 - Sin la cabecera `X-Logday-Session: cookie`, el sistema NO DEBERÁ leer
   la cookie (defensa CSRF), y DEBERÁ comportarse exactamente como antes.
 - En modo cookie, sin cookie ni token en el body, `/auth/refresh`
@@ -44,8 +50,11 @@ cambian: el modo cookie es opt-in por cabecera.
   igual.
 - El sistema DEBERÁ exponer `POST /auth/logout`, que revoque el
   dispositivo del refresh token presentado (body o, en modo cookie,
-  cookie), borre la cookie en modo cookie y responda 204 siempre,
-  también con un token desconocido o ya revocado.
+  cookie), también si ese token ya estaba rotado, borre la cookie en
+  modo cookie y responda 204 siempre, también con un token desconocido
+  o ya revocado.
+- Un login en modo cookie con una cookie de sesión válida DEBERÁ revocar
+  el dispositivo de esa cookie.
 
 ## Fuera de alcance
 

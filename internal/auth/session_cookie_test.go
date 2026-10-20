@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/cookiejar"
@@ -8,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 const testAdminLogin = `{"email":"admin@example.com","password":"test-password-123","device_name":"Logday Web"}`
@@ -52,19 +54,39 @@ func postAuth(t *testing.T, client *http.Client, srv *httptest.Server, path, bod
 }
 
 func refreshCookieIn(resp *http.Response) *http.Cookie {
+	return cookieNamed(resp, plainRefreshCookieName)
+}
+
+func cookieNamed(resp *http.Response, name string) *http.Cookie {
 	for _, c := range resp.Cookies() {
-		if c.Name == refreshCookieName {
+		if c.Name == name {
 			return c
 		}
 	}
 	return nil
 }
 
+func withReuseLeeway(t *testing.T, d time.Duration) {
+	t.Helper()
+	prev := refreshReuseLeeway
+	refreshReuseLeeway = d
+	t.Cleanup(func() { refreshReuseLeeway = prev })
+}
+
+func countDevices(t *testing.T, database *sql.DB) int {
+	t.Helper()
+	var n int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM devices`).Scan(&n); err != nil {
+		t.Fatalf("counting devices: %v", err)
+	}
+	return n
+}
+
 func jarRefreshCookie(t *testing.T, client *http.Client, srv *httptest.Server) string {
 	t.Helper()
 	u, _ := url.Parse(srv.URL + "/auth/refresh")
 	for _, c := range client.Jar.Cookies(u) {
-		if c.Name == refreshCookieName {
+		if c.Name == plainRefreshCookieName {
 			return c.Value
 		}
 	}
@@ -87,9 +109,9 @@ func TestCookieLoginKeepsRefreshTokenOutOfTheBody(t *testing.T) {
 	}
 	c := refreshCookieIn(resp)
 	if c == nil {
-		t.Fatalf("no %s cookie set", refreshCookieName)
+		t.Fatalf("no %s cookie set", plainRefreshCookieName)
 	}
-	if !c.HttpOnly || c.SameSite != http.SameSiteStrictMode || c.Path != refreshCookiePath || c.Secure {
+	if !c.HttpOnly || c.SameSite != http.SameSiteStrictMode || c.Path != plainRefreshCookiePath || c.Secure {
 		t.Fatalf("cookie attributes = HttpOnly:%v SameSite:%v Path:%q Secure:%v, want HttpOnly, Strict, /auth, not Secure over plain HTTP", c.HttpOnly, c.SameSite, c.Path, c.Secure)
 	}
 }
@@ -174,6 +196,7 @@ func TestCookieRefreshMigratesABodyToken(t *testing.T) {
 // Reusing an already-rotated refresh token still revokes the device,
 // and in cookie mode the dead cookie is cleared.
 func TestCookieReuseRevokesAndClears(t *testing.T) {
+	withReuseLeeway(t, 0)
 	srv, _, _ := setupPolicyTestServer(t)
 	browser := newBrowser(t)
 	postAuth(t, browser, srv, "/auth/login", testAdminLogin, true, nil)
@@ -245,24 +268,35 @@ func TestCookieIsSecureBehindAnHTTPSProxy(t *testing.T) {
 	srv, _, _ := setupPolicyTestServer(t)
 
 	resp, _ := postAuth(t, newBrowser(t), srv, "/auth/login", testAdminLogin, true, map[string]string{"X-Forwarded-Proto": "https"})
-	if c := refreshCookieIn(resp); c == nil || !c.Secure {
-		t.Fatalf("cookie should be Secure when the proxy says HTTPS")
+	c := cookieNamed(resp, secureRefreshCookieName)
+	if c == nil || !c.Secure || c.Path != "/" || c.Domain != "" {
+		t.Fatalf("over HTTPS the cookie should be __Host- prefixed, Secure, Path=/ and host-only, got %+v", c)
+	}
+	if cookieNamed(resp, plainRefreshCookieName) != nil {
+		t.Fatalf("over HTTPS the unprefixed cookie must not be set")
 	}
 }
 
-// Two refreshes racing with the same token (two tabs, or an attacker
-// racing the real client): exactly one wins, the rest get 401 — never
-// a 500 — and, as with any reuse, the device ends up revoked.
-func TestConcurrentRefreshWithTheSameTokenIsReuse(t *testing.T) {
+func TestCookieSecureAlwaysForcesSecure(t *testing.T) {
+	t.Setenv("COOKIE_SECURE", "always")
 	srv, _, _ := setupPolicyTestServer(t)
+
+	resp, _ := postAuth(t, newBrowser(t), srv, "/auth/login", testAdminLogin, true, nil)
+	if c := cookieNamed(resp, secureRefreshCookieName); c == nil || !c.Secure {
+		t.Fatalf("COOKIE_SECURE=always should set the Secure __Host- cookie even over plain HTTP")
+	}
+}
+
+// Two refreshes racing with the same token (two tabs, or a reload while
+// a refresh is in flight): within the reuse leeway every one of them
+// succeeds — none gets a 500 and the session is not revoked.
+func TestConcurrentRefreshWithinTheLeewayKeepsTheSession(t *testing.T) {
+	srv, _, database := setupPolicyTestServer(t)
 	_, tok := postAuth(t, newBrowser(t), srv, "/auth/login", testAdminLogin, false, nil)
+	before := countDevices(t, database)
 
 	const n = 5
-	type result struct {
-		status int
-		token  string
-	}
-	results := make(chan result, n)
+	statuses := make(chan int, n)
 	start := make(chan struct{})
 	for i := 0; i < n; i++ {
 		go func() {
@@ -271,38 +305,114 @@ func TestConcurrentRefreshWithTheSameTokenIsReuse(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
-				results <- result{status: -1}
+				statuses <- -1
 				return
 			}
-			defer func() { _ = resp.Body.Close() }()
-			var body tokenResponse
-			if resp.StatusCode == http.StatusOK {
-				_ = json.NewDecoder(resp.Body).Decode(&body)
-			}
-			results <- result{status: resp.StatusCode, token: body.RefreshToken}
+			_ = resp.Body.Close()
+			statuses <- resp.StatusCode
 		}()
 	}
 	close(start)
-
-	var ok, unauthorized int
-	var winner string
 	for i := 0; i < n; i++ {
-		r := <-results
-		switch r.status {
-		case http.StatusOK:
-			ok++
-			winner = r.token
-		case http.StatusUnauthorized:
-			unauthorized++
-		default:
-			t.Fatalf("concurrent refresh answered %d, want only 200 or 401", r.status)
+		if s := <-statuses; s != http.StatusOK {
+			t.Fatalf("concurrent refresh within the leeway answered %d, want 200", s)
 		}
 	}
-	if ok != 1 || unauthorized != n-1 {
-		t.Fatalf("got %d OK and %d 401, want exactly 1 OK", ok, unauthorized)
+	if after := countDevices(t, database); after != before {
+		t.Fatalf("devices went from %d to %d: the session was revoked", before, after)
 	}
-	resp, _ := postAuth(t, newBrowser(t), srv, "/auth/refresh", `{"refresh_token":"`+winner+`"}`, false, nil)
+}
+
+// Within the leeway, presenting a just-rotated token rotates the
+// device's current one instead of revoking: what a reload during an
+// in-flight refresh looks like to the server.
+func TestJustRotatedTokenWithinTheLeewayStillRefreshes(t *testing.T) {
+	srv, _, _ := setupPolicyTestServer(t)
+	browser := newBrowser(t)
+	postAuth(t, browser, srv, "/auth/login", testAdminLogin, true, nil)
+	lost := jarRefreshCookie(t, browser, srv)
+	postAuth(t, browser, srv, "/auth/refresh", "", true, nil) // its Set-Cookie "never arrived"
+
+	reloaded := newBrowser(t)
+	resp, tok := postAuth(t, reloaded, srv, "/auth/refresh", `{"refresh_token":"`+lost+`"}`, true, nil)
+	if resp.StatusCode != http.StatusOK || tok.AccessToken == "" {
+		t.Fatalf("just-rotated token within the leeway: status %d", resp.StatusCode)
+	}
+	if resp, _ := postAuth(t, reloaded, srv, "/auth/refresh", "", true, nil); resp.StatusCode != http.StatusOK {
+		t.Fatalf("the new cookie should keep working, got %d", resp.StatusCode)
+	}
+}
+
+// Once the cookie exists it wins over a body token: a second tab that
+// still had the pre-cookie token in localStorage, after the first tab
+// migrated it, must not get the device revoked as reuse.
+func TestCookieWinsOverABodyTokenOnceMigrated(t *testing.T) {
+	withReuseLeeway(t, 0)
+	srv, _, _ := setupPolicyTestServer(t)
+	browser := newBrowser(t)
+	_, legacy := postAuth(t, browser, srv, "/auth/login", testAdminLogin, false, nil)
+	body := `{"refresh_token":"` + legacy.RefreshToken + `"}`
+	if resp, _ := postAuth(t, browser, srv, "/auth/refresh", body, true, nil); resp.StatusCode != http.StatusOK {
+		t.Fatalf("first tab migration: status %d", resp.StatusCode)
+	}
+
+	resp, _ := postAuth(t, browser, srv, "/auth/refresh", body, true, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("second tab with the old body token and the new cookie: status %d, want 200", resp.StatusCode)
+	}
+}
+
+// Two cookies with our name means one was planted (a parent domain or
+// another path): neither is trusted.
+func TestDuplicateSessionCookiesAreNoSession(t *testing.T) {
+	srv, _, _ := setupPolicyTestServer(t)
+	browser := newBrowser(t)
+	postAuth(t, browser, srv, "/auth/login", testAdminLogin, true, nil)
+	real := jarRefreshCookie(t, browser, srv)
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/auth/refresh", strings.NewReader(""))
+	req.Header.Set(sessionModeHeader, sessionModeCookie)
+	req.Header.Add("Cookie", plainRefreshCookieName+"=planted-by-a-sibling")
+	req.Header.Add("Cookie", plainRefreshCookieName+"="+real)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("after a reuse race the device should be revoked, winner's token got %d", resp.StatusCode)
+		t.Fatalf("duplicate cookies: status %d, want 401", resp.StatusCode)
+	}
+}
+
+// A refresh in flight when the user logs out may already have rotated
+// the token the logout carries: the device must still be revoked.
+func TestLogoutWithAnAlreadyRotatedTokenRevokes(t *testing.T) {
+	srv, _, database := setupPolicyTestServer(t)
+	before := countDevices(t, database)
+	client := newBrowser(t)
+	_, tok := postAuth(t, client, srv, "/auth/login", testAdminLogin, false, nil)
+	postAuth(t, client, srv, "/auth/refresh", `{"refresh_token":"`+tok.RefreshToken+`"}`, false, nil)
+
+	resp, _ := postAuth(t, client, srv, "/auth/logout", `{"refresh_token":"`+tok.RefreshToken+`"}`, false, nil)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("logout: status %d", resp.StatusCode)
+	}
+	if after := countDevices(t, database); after != before {
+		t.Fatalf("devices: %d before login, %d after logout — the device survived", before, after)
+	}
+}
+
+// Logging in again while the browser still holds a working session
+// cookie (lost hint, failed restore) must not leave the old device
+// orphaned next to the new one.
+func TestCookieLoginReplacesTheOldCookieSession(t *testing.T) {
+	srv, _, database := setupPolicyTestServer(t)
+	browser := newBrowser(t)
+	postAuth(t, browser, srv, "/auth/login", testAdminLogin, true, nil)
+	afterFirst := countDevices(t, database)
+
+	postAuth(t, browser, srv, "/auth/login", testAdminLogin, true, nil)
+	if got := countDevices(t, database); got != afterFirst {
+		t.Fatalf("devices after logging in again with a live cookie: %d, want %d", got, afterFirst)
 	}
 }

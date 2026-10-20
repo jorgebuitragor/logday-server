@@ -156,6 +156,40 @@ func (s *store) getDeviceByRefreshTokenHash(ctx context.Context, hash string) (*
 	return scanDevice(row)
 }
 
+// getDeviceByID loads a device by its ID; errNotFound if it no longer
+// exists (revoked).
+func (s *store) getDeviceByID(ctx context.Context, id string) (*device, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, user_id, device_name, refresh_token_hash, refresh_token_expires_at, created_at, last_used_at
+		 FROM devices WHERE id = ?`, id)
+	return scanDevice(row)
+}
+
+// getDeviceRotatedWithin returns the device whose refresh token with
+// this hash was rotated away at most `within` ago. errNotFound when the
+// hash was never rotated or was rotated longer ago than that: the
+// caller then treats a presentation of it as reuse (see the refresh
+// handler's reuse leeway, specs/sesion-cookie/design.md).
+func (s *store) getDeviceRotatedWithin(ctx context.Context, hash string, within time.Duration) (*device, error) {
+	var deviceID, usedAt string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT device_id, used_at FROM used_refresh_tokens WHERE token_hash = ?`, hash).Scan(&deviceID, &usedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, errNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("looking up used refresh token: %w", err)
+	}
+	t, err := parseTime(usedAt)
+	if err != nil {
+		return nil, err
+	}
+	if time.Since(t) > within {
+		return nil, errNotFound
+	}
+	return s.getDeviceByID(ctx, deviceID)
+}
+
 func scanDevice(row *sql.Row) (*device, error) {
 	var d device
 	var expiresAt, createdAt, lastUsedAt string

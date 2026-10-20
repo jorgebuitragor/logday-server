@@ -144,8 +144,11 @@ paths:
       description: |
         Con `X-Logday-Session: cookie` (modo cookie, solo para un navegador en
         el mismo origen, como Logday Web embebida) el refresh token no viene en
-        el JSON: se entrega en la cookie `logday_refresh` (`HttpOnly`,
-        `SameSite=Strict`, `Path=/auth`). Ver `specs/sesion-cookie/`.
+        el JSON: se entrega en una cookie `HttpOnly` y `SameSite=Strict`
+        (`__Host-logday_refresh` con `Path=/` por HTTPS; `logday_refresh` con
+        `Path=/auth` por HTTP plano). Si el navegador ya tenía una cookie de
+        sesión válida, ese dispositivo anterior se revoca. Ver
+        `specs/sesion-cookie/`.
       security: []
       parameters:
         - $ref: "#/components/parameters/SessionMode"
@@ -197,11 +200,15 @@ paths:
         (se trata como indicio de robo de token), invalidando toda la sesión.
 
         En modo cookie (`X-Logday-Session: cookie`) el body es opcional: el
-        token se toma de la cookie `logday_refresh` y la respuesta rota la
-        cookie, con `refresh_token` vacío en el JSON. Si además viene un
-        `refresh_token` en el body, ese tiene prioridad (migración de un
-        cliente que lo tenía guardado antes del modo cookie). Sin la cabecera,
-        la cookie se ignora.
+        token se toma de la cookie de sesión y la respuesta rota la cookie,
+        con `refresh_token` vacío en el JSON. Solo si no hay cookie se usa un
+        `refresh_token` del body (migración de un cliente que lo tenía
+        guardado antes del modo cookie). Sin la cabecera, la cookie se ignora.
+
+        Durante 20 s tras una rotación, presentar el token recién rotado rota
+        el token vigente del dispositivo en vez de revocarlo (recarga durante
+        un refresh en vuelo, pestañas en carrera). Pasado ese margen, el reuso
+        revoca el dispositivo.
       security: []
       parameters:
         - $ref: "#/components/parameters/SessionMode"
@@ -235,8 +242,9 @@ paths:
       summary: Cierra la sesión del refresh token presentado
       description: |
         Revoca el dispositivo al que pertenece el refresh token (mismo efecto que
-        `DELETE /devices/{id}`) y, en modo cookie, borra la cookie
-        `logday_refresh`, que los scripts de la página no pueden tocar. El token
+        `DELETE /devices/{id}`), también si el token ya estaba rotado, y, en
+        modo cookie, borra la cookie de sesión, que los scripts de la página no
+        pueden tocar. El token
         se toma del body o, en modo cookie, de la cookie. Siempre responde 204,
         también con un token desconocido o ya revocado.
       security: []
