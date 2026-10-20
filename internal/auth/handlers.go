@@ -36,6 +36,7 @@ func NewHandler(s *store, jwtSecret []byte) *Handler {
 func (h *Handler) Routes(r chi.Router) {
 	r.Post("/auth/login", h.login)
 	r.Post("/auth/refresh", h.refresh)
+	r.Post("/auth/logout", h.logout)
 	r.Get("/policy", h.policy)
 
 	r.Group(func(r chi.Router) {
@@ -160,6 +161,10 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if cookieMode(r) {
+		setRefreshCookie(w, r, rawRefresh, cfg.RefreshTokenTTL())
+		rawRefresh = ""
+	}
 	writeJSON(w, http.StatusOK, tokenResponseFor(access, rawRefresh, d.ID, cfg, u))
 }
 
@@ -168,17 +173,32 @@ type refreshRequest struct {
 }
 
 func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
-	var req refreshRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	token, err := refreshTokenFromRequest(r)
+	if err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if req.RefreshToken == "" {
+	if token == "" {
+		if cookieMode(r) {
+			// Cookie mode with no cookie: there is simply no session
+			// (first visit, logged out, or the cookie expired).
+			http.Error(w, "no session", http.StatusUnauthorized)
+			return
+		}
 		http.Error(w, "refresh_token is required", http.StatusBadRequest)
 		return
 	}
 
-	hash := security.HashOpaqueToken(req.RefreshToken)
+	// A refresh token that doesn't work anymore must not stay in the
+	// browser's cookie jar, or every page load would retry it.
+	unauthorized := func(msg string) {
+		if cookieMode(r) {
+			clearRefreshCookie(w, r)
+		}
+		http.Error(w, msg, http.StatusUnauthorized)
+	}
+
+	hash := security.HashOpaqueToken(token)
 
 	d, err := h.store.getDeviceByRefreshTokenHash(r.Context(), hash)
 	if err != nil {
@@ -187,19 +207,19 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 				_ = h.store.revokeDeviceByUsedTokenHash(r.Context(), hash)
 			}
 		}
-		http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+		unauthorized("invalid refresh token")
 		return
 	}
 
 	if time.Now().After(d.RefreshTokenExpiresAt) {
 		_ = h.store.deleteDevice(r.Context(), d.ID)
-		http.Error(w, "refresh token expired", http.StatusUnauthorized)
+		unauthorized("refresh token expired")
 		return
 	}
 
 	u, err := h.store.getUserByID(r.Context(), d.UserID)
 	if err != nil {
-		http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+		unauthorized("invalid refresh token")
 		return
 	}
 
@@ -226,6 +246,10 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if cookieMode(r) {
+		setRefreshCookie(w, r, newRaw, cfg.RefreshTokenTTL())
+		newRaw = ""
+	}
 	writeJSON(w, http.StatusOK, tokenResponseFor(access, newRaw, d.ID, cfg, u))
 }
 

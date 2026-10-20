@@ -40,6 +40,7 @@ tres archivos:
 | Arquitectura inicial | en diseño | [`arquitectura-inicial/`](./arquitectura-inicial/requirements.md) |
 | Sync incremental | implementado | [`sync-incremental/`](./sync-incremental/requirements.md) |
 | Auth multi-usuario | implementado (v1) | [`auth-multiusuario/`](./auth-multiusuario/requirements.md) |
+| Sesión por cookie HttpOnly | implementado | [`sesion-cookie/`](./sesion-cookie/requirements.md) |
 | Esquema de datos | implementado | [`esquema-datos/`](./esquema-datos/requirements.md) |
 | Convenciones de código | implementado | [`convenciones-codigo/`](./convenciones-codigo/requirements.md) |
 | Panel de administración web | implementado | [`panel-admin/`](./panel-admin/requirements.md) |
