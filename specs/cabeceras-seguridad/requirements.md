@@ -41,8 +41,9 @@ seguridad: ni CSP, ni `X-Frame-Options`, ni `Referrer-Policy`.
   Level 3 cubre el WebSocket `/ws`). DEBERÁ prohibir workers y frames.
 - Cuando la ruta sea `/setup`, `/admin/panel`, esté bajo `/admin/panel/`
   o bajo `/admin/static/`, el sistema DEBERÁ mandar una CSP para el
-  panel que permita scripts y estilos inline (las plantillas los usan)
-  y limite todo lo demás al mismo origen. Cualquier otra ruta bajo
+  panel que solo permita scripts y estilos del mismo origen, sin
+  `'unsafe-inline'` (las plantillas no tienen código inline), y limite
+  todo lo demás al mismo origen. Cualquier otra ruta bajo
   `/admin` (como el endpoint JSON `/admin/users`) recibe la de API.
 - Para cualquier otra ruta (API JSON, `/health`, `/ws`), el sistema
   DEBERÁ mandar una CSP que lo niegue todo.
@@ -56,8 +57,5 @@ seguridad: ni CSP, ni `X-Frame-Options`, ni `Referrer-Policy`.
 - HSTS: TLS termina en el reverse proxy (ver
   [`arquitectura-inicial`](../arquitectura-inicial/requirements.md)),
   que es la capa que sabe si la instancia se sirve de verdad por HTTPS.
-- Quitar `'unsafe-inline'` del panel admin: requiere mover los
-  `<script>` y los `onclick` de las plantillas a archivos estáticos o
-  nonces. Queda pendiente.
 - La CSP del build standalone de `logday-web`: lo sirve otro host, que
   es quien tiene que mandarla.

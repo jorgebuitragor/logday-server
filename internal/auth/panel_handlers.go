@@ -24,6 +24,7 @@ import (
 // registers directly on r (no sub-router / chi.Mount).
 func (h *Handler) PanelRoutes(r chi.Router) {
 	r.Get("/admin/static/logo.svg", h.serveLogo)
+	r.Get("/admin/static/{file}", h.serveStatic)
 
 	r.Get("/setup", h.setupForm)
 	r.Post("/setup", h.setupSubmit)
@@ -63,6 +64,35 @@ func (h *Handler) serveLogo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	http.ServeContent(w, r, "logo.svg", time.Time{}, bytes.NewReader(data))
+}
+
+// panelStaticTypes is the allowlist of panel assets serveStatic hands
+// out, with their content type; anything else under /admin/static is a
+// 404, so the route can't be used to read other embedded files.
+var panelStaticTypes = map[string]string{
+	"panel.css":     "text/css; charset=utf-8",
+	"panel.js":      "text/javascript; charset=utf-8",
+	"theme-init.js": "text/javascript; charset=utf-8",
+}
+
+// serveStatic serves the panel's stylesheet and scripts. Short cache
+// (unlike the logo): the file names aren't content-hashed, and after a
+// binary upgrade the panel must pick up the new CSS/JS right away.
+func (h *Handler) serveStatic(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "file")
+	contentType, ok := panelStaticTypes[name]
+	if !ok {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	data, err := staticFS.ReadFile("static/" + name)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(data))
 }
 
 type formPageData struct {
@@ -569,7 +599,11 @@ func (h *Handler) panelUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	refreshTTL, refreshTTLErr := strconv.Atoi(r.FormValue("refresh_token_ttl_days"))
 	panelTTL, panelTTLErr := strconv.Atoi(r.FormValue("panel_session_ttl_hours"))
 	maxDevices, maxDevicesErr := strconv.Atoi(r.FormValue("max_devices_per_user"))
-	policyText := strings.TrimSpace(r.FormValue("privacy_policy_text"))
+	// Los navegadores mandan los saltos de línea de un <textarea> como
+	// \r\n (lo exige la spec de HTML al enviar un formulario), y el
+	// texto guardado usa \n: sin normalizar, cualquier guardado del panel
+	// parecía un cambio de la política y exigía subir su versión.
+	policyText := strings.TrimSpace(strings.ReplaceAll(r.FormValue("privacy_policy_text"), "\r\n", "\n"))
 	policyVersion, policyVersionErr := strconv.Atoi(r.FormValue("privacy_policy_version"))
 
 	// Un cambio de texto sin subir la versión dejaría a cualquier

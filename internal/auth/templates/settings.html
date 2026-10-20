@@ -110,19 +110,9 @@
     </p>
     {{if .GeneratedSecret}}
     <div class="secret-box">
-      <input type="text" readonly value="{{.GeneratedSecret}}" id="generated-secret" onclick="this.select()">
+      <input type="text" readonly value="{{.GeneratedSecret}}" id="generated-secret">
       <button type="button" class="btn btn-ghost icon-btn" id="copy-secret-btn" aria-label="Copiar">{{template "icon-copy"}}</button>
     </div>
-    <script>
-      (function () {
-        var btn = document.getElementById('copy-secret-btn');
-        var input = document.getElementById('generated-secret');
-        if (!btn || !input) return;
-        btn.addEventListener('click', function () {
-          navigator.clipboard.writeText(input.value);
-        });
-      })();
-    </script>
     {{end}}
     <form method="post" action="/admin/panel/settings/generate-secret">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
