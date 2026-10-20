@@ -141,7 +141,17 @@ paths:
       operationId: login
       tags: [Auth]
       summary: Login y creación de un nuevo dispositivo/sesión
+      description: |
+        Con `X-Logday-Session: cookie` (modo cookie, solo para un navegador en
+        el mismo origen, como Logday Web embebida) el refresh token no viene en
+        el JSON: se entrega en una cookie `HttpOnly` y `SameSite=Strict`
+        (`__Host-logday_refresh` con `Path=/` por HTTPS; `logday_refresh` con
+        `Path=/auth` por HTTP plano). Si el navegador ya tenía una cookie de
+        sesión válida, ese dispositivo anterior se revoca. Ver
+        `specs/sesion-cookie/`.
       security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionMode"
       requestBody:
         required: true
         content:
@@ -150,7 +160,7 @@ paths:
               $ref: "#/components/schemas/LoginRequest"
       responses:
         "200":
-          description: Login exitoso. Guardar `refresh_token` y `device_id` de forma persistente en el cliente.
+          description: Login exitoso. Guardar `refresh_token` y `device_id` de forma persistente en el cliente. En modo cookie, `refresh_token` llega vacío y el token va en la cookie.
           content:
             application/json:
               schema:
@@ -188,9 +198,22 @@ paths:
         El refresh token devuelto reemplaza al usado en la request — descartar
         el anterior. Reusar un refresh token ya rotado revoca el dispositivo
         (se trata como indicio de robo de token), invalidando toda la sesión.
+
+        En modo cookie (`X-Logday-Session: cookie`) el body es opcional: el
+        token se toma de la cookie de sesión y la respuesta rota la cookie,
+        con `refresh_token` vacío en el JSON. Solo si no hay cookie se usa un
+        `refresh_token` del body (migración de un cliente que lo tenía
+        guardado antes del modo cookie). Sin la cabecera, la cookie se ignora.
+
+        Durante 20 s tras una rotación, presentar el token recién rotado rota
+        el token vigente del dispositivo en vez de revocarlo (recarga durante
+        un refresh en vuelo, pestañas en carrera). Pasado ese margen, el reuso
+        revoca el dispositivo.
       security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionMode"
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
@@ -205,12 +228,39 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
-          description: Refresh token inválido, ya usado (y por lo tanto revocado) o expirado.
+          description: Refresh token inválido, ya usado (y por lo tanto revocado) o expirado. En modo cookie también cuando no hay cookie (`no session`); si la cookie no sirve, la respuesta la borra.
           content:
             text/plain:
               schema:
                 type: string
                 example: invalid refresh token
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [Auth]
+      summary: Cierra la sesión del refresh token presentado
+      description: |
+        Revoca el dispositivo al que pertenece el refresh token (mismo efecto que
+        `DELETE /devices/{id}`), también si el token ya estaba rotado, y, en
+        modo cookie, borra la cookie de sesión, que los scripts de la página no
+        pueden tocar. El token
+        se toma del body o, en modo cookie, de la cookie. Siempre responde 204,
+        también con un token desconocido o ya revocado.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionMode"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "204":
+          description: Sesión cerrada (o ya no existía).
+        "400":
+          $ref: "#/components/responses/BadRequest"
 
   /devices:
     get:
@@ -1217,6 +1267,18 @@ components:
       description: "Access token devuelto por `/auth/login` o `/auth/refresh`, enviado como `Authorization: Bearer <access_token>`."
 
   parameters:
+    SessionMode:
+      name: X-Logday-Session
+      in: header
+      required: false
+      description: |
+        `cookie` activa el modo cookie: el refresh token viaja solo en la cookie
+        `HttpOnly` `logday_refresh`. Pensado para un navegador servido en el mismo
+        origen (Logday Web embebida). Es también la defensa CSRF: la cookie solo
+        se lee si esta cabecera viene en el pedido.
+      schema:
+        type: string
+        enum: [cookie]
     ResourceId:
       name: id
       in: path
@@ -1291,7 +1353,7 @@ components:
           description: "JWT de corta duración (TTL configurable por el admin). Enviar como `Authorization: Bearer <access_token>`."
         refresh_token:
           type: string
-          description: Token opaco de larga duración. Guardar de forma segura — reemplaza al anterior en cada `/auth/refresh`.
+          description: "Token opaco de larga duración. Guardar de forma segura — reemplaza al anterior en cada `/auth/refresh`. Vacío en modo cookie (`X-Logday-Session: cookie`), donde viaja en la cookie `logday_refresh`."
         device_id:
           type: string
         policy_version:

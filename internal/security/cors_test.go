@@ -86,3 +86,24 @@ func TestCORSMiddleware_PreflightHandledDirectly(t *testing.T) {
 		t.Fatal("expected Access-Control-Max-Age to be set")
 	}
 }
+
+// The cookie session's CSRF guard (internal/auth, specs/sesion-cookie/)
+// relies on two things here: a cross-origin page can't get the
+// X-Logday-Session header approved in a preflight, and credentialed
+// CORS is never enabled. If either changes, the session cookie becomes
+// usable from an allowed origin.
+func TestCORSMiddleware_NeverApprovesTheSessionHeaderNorCredentials(t *testing.T) {
+	req := httptest.NewRequest(http.MethodOptions, "/auth/refresh", nil)
+	req.Header.Set("Origin", "https://allowed.example")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	req.Header.Set("Access-Control-Request-Headers", "x-logday-session")
+	rec := httptest.NewRecorder()
+	newCORSTestHandler().ServeHTTP(rec, req)
+
+	if allowed := strings.ToLower(rec.Header().Get("Access-Control-Allow-Headers")); strings.Contains(allowed, "x-logday-session") {
+		t.Fatalf("preflight approved X-Logday-Session: %q", allowed)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "" {
+		t.Fatalf("Access-Control-Allow-Credentials must never be sent, got %q", got)
+	}
+}

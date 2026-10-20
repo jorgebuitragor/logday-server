@@ -36,6 +36,7 @@ func NewHandler(s *store, jwtSecret []byte) *Handler {
 func (h *Handler) Routes(r chi.Router) {
 	r.Post("/auth/login", h.login)
 	r.Post("/auth/refresh", h.refresh)
+	r.Post("/auth/logout", h.logout)
 	r.Get("/policy", h.policy)
 
 	r.Group(func(r chi.Router) {
@@ -160,7 +161,32 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if cookieMode(r) {
+		h.revokeCookieSessionOnLogin(r)
+		setRefreshCookie(w, r, rawRefresh, cfg.RefreshTokenTTL())
+		rawRefresh = ""
+	}
 	writeJSON(w, http.StatusOK, tokenResponseFor(access, rawRefresh, d.ID, cfg, u))
+}
+
+// refreshReuseLeeway: for this long after a refresh token is rotated,
+// presenting it again rotates the device's current token instead of
+// being treated as theft. Every page load of logday-web in cookie mode
+// refreshes, so a reload while a refresh is in flight (the server
+// committed the rotation but the browser never got the new cookie) or
+// two tabs racing would otherwise revoke a legitimate session. Same
+// idea as Auth0/Okta's refresh token "reuse interval". The trade-off:
+// a stolen token is still exchangeable within this window after the
+// legitimate rotation; after it, reuse revokes the device as before.
+var refreshReuseLeeway = 20 * time.Second // a var only so tests can shrink it
+
+// revokeIfReused revokes the device when hash belongs to an
+// already-rotated refresh token (outside the leeway): presenting it
+// again signals possible token theft.
+func (h *Handler) revokeIfReused(r *http.Request, hash string) {
+	if reused, err := h.store.wasRefreshTokenUsed(r.Context(), hash); err == nil && reused {
+		_ = h.store.revokeDeviceByUsedTokenHash(r.Context(), hash)
+	}
 }
 
 type refreshRequest struct {
@@ -168,38 +194,59 @@ type refreshRequest struct {
 }
 
 func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
-	var req refreshRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	token, err := refreshTokenFromRequest(r)
+	if err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if req.RefreshToken == "" {
+	if token == "" {
+		if cookieMode(r) {
+			// Cookie mode with no cookie: there is simply no session
+			// (first visit, logged out, or the cookie expired).
+			http.Error(w, "no session", http.StatusUnauthorized)
+			return
+		}
 		http.Error(w, "refresh_token is required", http.StatusBadRequest)
 		return
 	}
 
-	hash := security.HashOpaqueToken(req.RefreshToken)
-
-	d, err := h.store.getDeviceByRefreshTokenHash(r.Context(), hash)
-	if err != nil {
-		if errors.Is(err, errNotFound) {
-			if reused, checkErr := h.store.wasRefreshTokenUsed(r.Context(), hash); checkErr == nil && reused {
-				_ = h.store.revokeDeviceByUsedTokenHash(r.Context(), hash)
-			}
+	// A refresh token that doesn't work anymore must not stay in the
+	// browser's cookie jar, or every page load would retry it.
+	unauthorized := func(msg string) {
+		if cookieMode(r) {
+			clearRefreshCookie(w, r)
 		}
-		http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+		http.Error(w, msg, http.StatusUnauthorized)
+	}
+
+	hash := security.HashOpaqueToken(token)
+
+	// rotateFrom is the hash the rotation replaces: normally the one
+	// presented, but within the reuse leeway it's the device's current
+	// one (the presented token was already rotated moments ago).
+	d, err := h.store.getDeviceByRefreshTokenHash(r.Context(), hash)
+	rotateFrom := hash
+	if errors.Is(err, errNotFound) {
+		d, err = h.store.getDeviceRotatedWithin(r.Context(), hash, refreshReuseLeeway)
+		if err == nil {
+			rotateFrom = d.RefreshTokenHash
+		}
+	}
+	if err != nil {
+		h.revokeIfReused(r, hash)
+		unauthorized("invalid refresh token")
 		return
 	}
 
 	if time.Now().After(d.RefreshTokenExpiresAt) {
 		_ = h.store.deleteDevice(r.Context(), d.ID)
-		http.Error(w, "refresh token expired", http.StatusUnauthorized)
+		unauthorized("refresh token expired")
 		return
 	}
 
 	u, err := h.store.getUserByID(r.Context(), d.UserID)
 	if err != nil {
-		http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+		unauthorized("invalid refresh token")
 		return
 	}
 
@@ -215,7 +262,26 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.store.rotateRefreshToken(r.Context(), d.ID, hash, newHash, time.Now().Add(cfg.RefreshTokenTTL()), cfg.RefreshTokenTTL(), clientIP(r), r.UserAgent()); err != nil {
+	// Losing the compare-and-swap means another refresh of this same
+	// device rotated it a moment ago (two tabs, a reload during an
+	// in-flight refresh): that is within the leeway by definition, not
+	// theft, so retry from the device's new current hash instead of
+	// revoking. Bounded, because each loss means someone else won.
+	const maxRotationAttempts = 5
+	for attempt := 1; ; attempt++ {
+		err = h.store.rotateRefreshToken(r.Context(), d.ID, rotateFrom, newHash, time.Now().Add(cfg.RefreshTokenTTL()), cfg.RefreshTokenTTL(), clientIP(r), r.UserAgent())
+		if !errors.Is(err, errRefreshTokenReused) || attempt == maxRotationAttempts {
+			break
+		}
+		cur, lookupErr := h.store.getDeviceByID(r.Context(), d.ID)
+		if lookupErr != nil {
+			// Revoked meanwhile (logout, or reuse detected elsewhere).
+			unauthorized("invalid refresh token")
+			return
+		}
+		rotateFrom = cur.RefreshTokenHash
+	}
+	if err != nil {
 		httperr.Internal(w, r, err)
 		return
 	}
@@ -226,6 +292,10 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if cookieMode(r) {
+		setRefreshCookie(w, r, newRaw, cfg.RefreshTokenTTL())
+		newRaw = ""
+	}
 	writeJSON(w, http.StatusOK, tokenResponseFor(access, newRaw, d.ID, cfg, u))
 }
 
