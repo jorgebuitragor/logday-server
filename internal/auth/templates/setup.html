@@ -12,7 +12,7 @@
     <span class="brand-name">{{if .InstanceName}}{{.InstanceName}}{{else}}Logday Server{{end}}</span>
   </div>
   <h1>Configurar instancia</h1>
-  <p class="hint">Todavía no hay ningún administrador. Creá la primera cuenta para empezar.</p>
+  <p class="hint">Todavía no hay ningún administrador. Crea la primera cuenta para empezar.</p>
   {{if .Error}}<p class="error">{{template "icon-triangle-alert"}} {{.Error}}</p>{{end}}
   <form method="post" action="/setup">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">

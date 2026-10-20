@@ -282,7 +282,7 @@ func (h *Handler) panelLoginSubmit(w http.ResponseWriter, r *http.Request) {
 
 	limitKey := clientIP(r) + ":" + strings.ToLower(email)
 	if !h.limiter.Allow(limitKey) {
-		renderLoginError(http.StatusTooManyRequests, "demasiados intentos, probá de nuevo más tarde")
+		renderLoginError(http.StatusTooManyRequests, "demasiados intentos, inténtalo de nuevo más tarde")
 		return
 	}
 
@@ -422,7 +422,7 @@ func (h *Handler) panelSetAdmin(w http.ResponseWriter, r *http.Request, isAdmin 
 	if err := h.store.updateUserAdmin(r.Context(), id, isAdmin); err != nil {
 		switch {
 		case errors.Is(err, errLastAdmin):
-			h.redirectWithError(w, r, "/admin/panel", "no podés quitarle admin al único administrador activo")
+			h.redirectWithError(w, r, "/admin/panel", "no puedes quitarle admin al único administrador activo")
 		case errors.Is(err, errNotFound):
 			h.redirectWithError(w, r, "/admin/panel", "usuario no encontrado")
 		default:
@@ -450,7 +450,7 @@ func (h *Handler) panelDeleteUser(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.softDeleteUser(r.Context(), id); err != nil {
 		switch {
 		case errors.Is(err, errLastAdmin):
-			h.redirectWithError(w, r, "/admin/panel", "no podés dar de baja al único administrador activo")
+			h.redirectWithError(w, r, "/admin/panel", "no puedes dar de baja al único administrador activo")
 		case errors.Is(err, errNotFound):
 			h.redirectWithError(w, r, "/admin/panel", "usuario no encontrado")
 		default:
@@ -624,7 +624,7 @@ func (h *Handler) panelUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	// vez de bloquear el guardado por un error no relacionado.
 	current, currentErr := settings.Get(r.Context(), h.store.db)
 	if currentErr == nil && current != nil && policyText != current.PrivacyPolicyText && policyVersionErr == nil && policyVersion <= current.PrivacyPolicyVersion {
-		h.redirectWithError(w, r, "/admin/panel/settings", "cambiaste el texto de la política — subí la versión para que los usuarios que ya aceptaron la vean de nuevo")
+		h.redirectWithError(w, r, "/admin/panel/settings", "cambiaste el texto de la política — sube la versión para que los usuarios que ya aceptaron la vean de nuevo")
 		return
 	}
 
