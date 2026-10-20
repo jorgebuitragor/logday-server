@@ -47,3 +47,4 @@ tres archivos:
 | Web app embebida | implementado (sin mergear) | [`webapp-embebida/`](./webapp-embebida/requirements.md) |
 | Papelera compartida entre servicios | implementado | [`papelera-compartida/`](./papelera-compartida/requirements.md) |
 | CORS configurable | implementado | [`cors-configurable/`](./cors-configurable/requirements.md) |
+| Cabeceras de seguridad (CSP) | implementado | [`cabeceras-seguridad/`](./cabeceras-seguridad/requirements.md) |
