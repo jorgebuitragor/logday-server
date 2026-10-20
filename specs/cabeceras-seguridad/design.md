@@ -14,21 +14,32 @@ errores y los preflight.
 | Ruta | Política | Por qué |
 |---|---|---|
 | `/app`, `/app/…` | estricta | Es la página que tiene la sesión del usuario. |
-| `/setup`, `/admin`, `/admin/…` | panel | Las plantillas usan `<script>`, `<style>` y `onclick` inline. |
-| todo lo demás | `default-src 'none'` | JSON, `/health` y `/ws` nunca se renderizan como documento. |
+| `/setup`, `/admin/panel`, `/admin/panel/…`, `/admin/static/…` | panel | Las plantillas usan `<script>`, `<style>` y `onclick` inline. |
+| todo lo demás | `default-src 'none'` | JSON (incluido `/admin/users`), `/health` y `/ws` nunca se renderizan como documento. |
 
 `/application` no cuenta como `/app`: se compara la ruta exacta o el
-prefijo `/app/`.
+prefijo `/app/`. El panel se enumera de forma explícita, en vez de
+"todo `/admin`", para que un endpoint JSON futuro bajo `/admin` no
+herede `'unsafe-inline'`.
 
 ### `/app`
 
 ```
 default-src 'self'; script-src 'self'; style-src 'self';
-style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:;
-font-src 'self' data:; worker-src 'self' blob:; manifest-src 'self';
-object-src 'none'; base-uri 'self'; form-action 'self';
-frame-ancestors 'none'; connect-src 'self' ws://<host> wss://<host>
+style-src-attr 'unsafe-inline'; img-src 'self' data: https:;
+font-src 'self' data:; connect-src 'self'; worker-src 'none';
+frame-src 'none'; manifest-src 'self'; object-src 'none';
+base-uri 'self'; form-action 'self'; frame-ancestors 'none'
 ```
+
+**Qué protege y qué no.** Protege contra que un script inyectado se
+*ejecute*: inline, por atributo de evento o con `eval`. No impide que un
+script que ya corre saque datos: le quedan las imágenes (`img-src
+https:`), la navegación (`location`, `window.open`; CSP no tiene
+`navigate-to`) y canales que CSP no controla. `connect-src 'self'`
+solo cierra `fetch`, XHR y WebSocket. Por eso esta CSP va junto con la
+cookie `HttpOnly` del refresh token ([`sesion-cookie/`](../sesion-cookie/design.md)),
+que es la que lo deja fuera del alcance de cualquier script.
 
 - **Sin script inline ni `eval`.** `logday-web` no los necesita: Vite
   emite solo `<script type="module" src>` y CSS en archivo, y React
@@ -39,18 +50,24 @@ frame-ancestors 'none'; connect-src 'self' ws://<host> wss://<host>
   TextAlign serializan `<span style="…">` en el Markdown, y DOMPurify
   conserva el atributo). Un atributo `style` no ejecuta código ni usa
   selectores, así que no abre una vía para leer la página; los
-  elementos `<style>` siguen bloqueados.
+  elementos `<style>` siguen bloqueados. Además, el sanitizador de
+  `logday-web` (`renderMarkdown.ts`) deja pasar solo `color`,
+  `background-color` y `text-align`, así que una nota no puede tapar la
+  interfaz con `position:fixed` ni cargar recursos con `url()`.
 - **`img-src https:`.** Las notas son Markdown y pueden embeber
-  imágenes de cualquier sitio. Deja las imágenes como posible canal de
-  exfiltración (un script inyectado podría pedir
-  `https://atacante/?t=…` como imagen), un riesgo que se acepta.
-  `connect-src` sí queda limitado al mismo origen.
-- **WebSocket explícito.** CSP Level 3 dice que `'self'` cubre `ws:`/
-  `wss:` del mismo host, pero WebKit viejo solo aceptaba el esquema de
-  la página. Se listan los dos esquemas con el `Host` del pedido porque,
-  detrás de un proxy que termina TLS, el servidor no sabe cuál usa el
-  navegador. Un `Host` que no valida contra la expresión regular de
-  host no se copia: la política queda en `connect-src 'self'`.
+  imágenes de cualquier sitio. Las imágenes por `http:` dejan de
+  cargar (en HTTPS ya las bloqueaba el contenido mixto). Quitar `https:`
+  exigiría servir las imágenes a través de un proxy del servidor.
+- **`connect-src 'self'` a secas.** CSP Level 3 hace que `'self'` cubra
+  `ws:`/`wss:` del mismo host en los navegadores actuales. Un primer
+  borrador agregaba `ws://<Host>` y `wss://<Host>` tomados del pedido,
+  pero detrás de un proxy que reescribe `Host` esas entradas no
+  corresponden a la página, y además obligaban a validar un valor que
+  controla el cliente. Se descartó.
+- **`worker-src 'none'` y `frame-src 'none'`.** La app no usa workers
+  ni iframes.
+- **Sin `blob:` en `img-src`.** Las descargas (Excel, exportaciones)
+  usan `blob:` para navegar con `<a download>`, no como imagen.
 
 ### Panel
 
@@ -62,12 +79,25 @@ Cloudflare Access (ver [`panel-admin`](../panel-admin/design.md)).
 
 ## Cabeceras comunes
 
-- `Referrer-Policy: no-referrer`: un link dentro de una nota filtraría
-  `/app/notes/<id>` al sitio de destino.
+- `Referrer-Policy: same-origin`: un link dentro de una nota no filtra
+  `/app/notes/<id>` al sitio de destino, y los pedidos al mismo origen
+  conservan la cabecera `Origin`. Con `no-referrer`, el navegador manda
+  `Origin: null` en los POST same-origin, lo que rompería cualquier
+  comprobación de CSRF por `Origin` en el futuro.
 - `X-Frame-Options: DENY`, además de `frame-ancestors 'none'`, para
   navegadores que no leen CSP.
 - `Cross-Origin-Opener-Policy: same-origin` y una `Permissions-Policy`
   que apaga APIs que la app no usa.
+
+## Revisión de seguridad
+
+Un sub-agente revisó la rama de forma independiente. No encontró nada
+de severidad alta. Se aplicaron sus hallazgos: la spec ya no promete que
+un script que corre no pueda sacar datos; el panel se enumera de forma
+explícita (antes `/admin/users`, un endpoint JSON, recibía la política
+del panel); se quitaron `blob:` y el `Host` del pedido y se agregaron
+`worker-src`/`frame-src 'none'`; `Referrer-Policy` pasó a
+`same-origin`; y los tests comparan la política completa.
 
 ## Validación en vivo (19 oct 2026)
 
