@@ -416,3 +416,34 @@ func TestCookieLoginReplacesTheOldCookieSession(t *testing.T) {
 		t.Fatalf("devices after logging in again with a live cookie: %d, want %d", got, afterFirst)
 	}
 }
+
+// The access token is a stateless JWT valid for its whole TTL, but it
+// must stop working the moment its device is gone (logout, revocation)
+// instead of up to 15 minutes later.
+func TestAccessTokenStopsWorkingAfterLogout(t *testing.T) {
+	srv, _, _ := setupPolicyTestServer(t)
+	client := newBrowser(t)
+	_, tok := postAuth(t, client, srv, "/auth/login", testAdminLogin, false, nil)
+
+	getDevices := func() int {
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/devices", nil)
+		req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET /devices: %v", err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if got := getDevices(); got != http.StatusOK {
+		t.Fatalf("before logout: status %d, want 200", got)
+	}
+	resp, _ := postAuth(t, client, srv, "/auth/logout", `{"refresh_token":"`+tok.RefreshToken+`"}`, false, nil)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("logout: status %d", resp.StatusCode)
+	}
+	if got := getDevices(); got != http.StatusUnauthorized {
+		t.Fatalf("after logout the access token still works: status %d, want 401", got)
+	}
+}

@@ -77,7 +77,11 @@ demás (`connect-src`, `form-action`, `base-uri`) en `'self'`, con
 panel necesitaba `'unsafe-inline'` porque las plantillas tenían
 `<script>`, `<style>` y `onclick` inline. Ahora el CSS y el JS están en
 `internal/auth/static/` (`panel.css`, `theme-init.js` y `panel.js`), y
-`templates_test.go` impide que vuelva a entrar código inline. El panel ya tiene su
+`templates_test.go` impide que vuelva a entrar código inline. Las plantillas
+los piden con `{{asset "panel.js"}}`, que agrega un hash del contenido
+(`?v=…`): Cloudflare cachea `/admin/static/*` por horas sin importar el
+`Cache-Control` del servidor, y con el hash un deploy nunca empareja una
+página nueva con un script viejo. El panel ya tiene su
 propia cookie `HttpOnly` y la recomendación de ponerlo detrás de
 Cloudflare Access (ver [`panel-admin`](../panel-admin/design.md)).
 

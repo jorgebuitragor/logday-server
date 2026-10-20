@@ -296,6 +296,21 @@ func (s *store) revokeDeviceByUsedTokenHash(ctx context.Context, hash string) er
 	return s.deleteDevice(ctx, deviceID)
 }
 
+// deviceExists reports whether a device row with this id is still
+// there. Used on every authenticated request (see verifyAccessToken):
+// a lookup by primary key.
+func (s *store) deviceExists(ctx context.Context, id string) (bool, error) {
+	var one int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM devices WHERE id = ?`, id).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("checking device: %w", err)
+	}
+	return true, nil
+}
+
 func (s *store) deleteDevice(ctx context.Context, id string) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM devices WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("deleting device: %w", err)
@@ -682,6 +697,12 @@ func (s *store) exportUserData(ctx context.Context, userID string) (map[string]a
 	devices, err := dumpTableForUser(ctx, s.db, "devices", userID)
 	if err != nil {
 		return nil, fmt.Errorf("exporting devices: %w", err)
+	}
+	// The refresh token hash isn't the user's data but a credential
+	// verifier: it says nothing about them, and the export file may end
+	// up anywhere. Dropped here so a generic SELECT * can't leak it.
+	for _, d := range devices {
+		delete(d, "refresh_token_hash")
 	}
 	out["devices"] = devices
 	return out, nil

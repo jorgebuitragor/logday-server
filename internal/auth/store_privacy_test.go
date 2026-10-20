@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/jorgebuitragor/logday-server/internal/settings"
 )
@@ -95,6 +96,10 @@ func TestExportAndDeleteUserAccount(t *testing.T) {
 		t.Fatalf("seeding an absence day: %v", err)
 	}
 
+	if _, err := s.createDevice(ctx, u.ID, "Mi Mac", "hash-de-prueba", time.Now().Add(time.Hour), "127.0.0.1", "test"); err != nil {
+		t.Fatalf("seeding a device: %v", err)
+	}
+
 	data, err := s.exportUserData(ctx, u.ID)
 	if err != nil {
 		t.Fatalf("exportUserData: %v", err)
@@ -106,6 +111,13 @@ func TestExportAndDeleteUserAccount(t *testing.T) {
 	absences, ok := data["absence_days"].([]map[string]any)
 	if !ok || len(absences) != 1 || absences[0]["type"] != "incapacidad" {
 		t.Fatalf("expected exactly the seeded absence day in the export, got %v", data["absence_days"])
+	}
+	devices, ok := data["devices"].([]map[string]any)
+	if !ok || len(devices) != 1 || devices[0]["device_name"] != "Mi Mac" {
+		t.Fatalf("expected exactly the seeded device in the export, got %v", data["devices"])
+	}
+	if _, leaked := devices[0]["refresh_token_hash"]; leaked {
+		t.Fatalf("the export must not include the refresh token hash, got %v", devices[0])
 	}
 
 	if err := s.deleteUserAccount(ctx, u.ID); err != nil {
