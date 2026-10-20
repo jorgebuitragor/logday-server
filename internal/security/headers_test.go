@@ -77,11 +77,21 @@ func TestHeadersMiddleware_PanelPolicy(t *testing.T) {
 			t.Errorf("%s got %q, want the panel policy", path, csp)
 		}
 	}
+	want := "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; " +
+		"frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+	if panelCSP != want {
+		t.Errorf("panel CSP =\n%s\nwant\n%s", panelCSP, want)
+	}
+	// The panel's templates have no inline code anymore
+	// (internal/auth/templates_test.go keeps it that way).
+	if strings.Contains(panelCSP, "'unsafe-inline'") || strings.Contains(panelCSP, "'unsafe-eval'") {
+		t.Errorf("panel CSP must not allow inline code: %s", panelCSP)
+	}
 }
 
-// /admin/users is a JSON endpoint, not part of the panel: it must not
-// get the panel's 'unsafe-inline' policy, and neither must any future
-// route under /admin that isn't the panel.
+// /admin/users is a JSON endpoint, not part of the panel: it gets the
+// API policy, and so does any future route under /admin that isn't the
+// panel.
 func TestHeadersMiddleware_APIPolicy(t *testing.T) {
 	for _, path := range []string{"/tasks", "/auth/login", "/ws", "/health", "/admin/users", "/admin", "/setup/", "/admin/panelx"} {
 		if csp := serveWithHeaders(t, path).Header().Get("Content-Security-Policy"); csp != apiCSP {

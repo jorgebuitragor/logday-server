@@ -18,10 +18,11 @@ import (
 //     possible); keeping the refresh token out of reach of scripts is
 //     the job of the HttpOnly session cookie (specs/sesion-cookie/).
 //   - The server-rendered panel (/setup, /admin/panel, /admin/static):
-//     the templates still use inline <script>/<style> blocks and
-//     onclick handlers, so script-src/style-src allow 'unsafe-inline'.
-//     Everything else (framing, plugins, <base>, form targets,
-//     connections) is locked to the same origin.
+//     its CSS and JS are served as files (internal/auth/static), with no
+//     inline <script>/<style> or event-handler attributes, so it gets
+//     the same no-inline policy for scripts and styles. Everything else
+//     (framing, plugins, <base>, form targets, connections) is locked
+//     to the same origin.
 //   - Everything else (JSON API, including /admin/users, /health,
 //     /ws): never rendered as a document, so the policy denies
 //     everything.
@@ -65,8 +66,8 @@ const (
 		"worker-src 'none'; frame-src 'none'; manifest-src 'self'; object-src 'none'; " +
 		"base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 
-	panelCSP = "default-src 'self'; script-src 'self' 'unsafe-inline'; " +
-		"style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; " +
+	panelCSP = "default-src 'self'; script-src 'self'; " +
+		"style-src 'self'; img-src 'self' data:; connect-src 'self'; " +
 		"frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 
 	apiCSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"

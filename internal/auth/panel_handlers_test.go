@@ -849,4 +849,18 @@ func TestPanelSettingsRequiresPolicyVersionBumpOnTextChange(t *testing.T) {
 	if !strings.Contains(bumped.Header.Get("Location"), "success=") {
 		t.Fatalf("changing text with a bumped version: expected success redirect, got Location=%q", bumped.Header.Get("Location"))
 	}
+
+	// Un texto con varias líneas, reenviado tal cual lo manda un
+	// navegador (\r\n en el <textarea>), no es un cambio: antes cualquier
+	// guardado del panel exigía subir la versión.
+	multiline := postForm(t, client, srv, "/admin/panel/settings", baseForm("Línea uno.\nLínea dos.", "4"))
+	_ = multiline.Body.Close()
+	if !strings.Contains(multiline.Header.Get("Location"), "success=") {
+		t.Fatalf("seeding multi-line text: expected success redirect, got Location=%q", multiline.Header.Get("Location"))
+	}
+	crlf := postForm(t, client, srv, "/admin/panel/settings", baseForm("Línea uno.\r\nLínea dos.", "4"))
+	_ = crlf.Body.Close()
+	if !strings.Contains(crlf.Header.Get("Location"), "success=") {
+		t.Fatalf("resubmitting the same text with browser CRLF newlines: expected success redirect, got Location=%q", crlf.Header.Get("Location"))
+	}
 }

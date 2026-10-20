@@ -71,9 +71,13 @@ que es la que lo deja fuera del alcance de cualquier script.
 
 ### Panel
 
-`script-src`/`style-src` con `'unsafe-inline'`, y todo lo demás
-(`connect-src`, `form-action`, `base-uri`) en `'self'`, con
-`frame-ancestors 'none'` y `object-src 'none'`. El panel ya tiene su
+`script-src 'self'; style-src 'self'`, sin `'unsafe-inline'`, y todo lo
+demás (`connect-src`, `form-action`, `base-uri`) en `'self'`, con
+`frame-ancestors 'none'` y `object-src 'none'`. Hasta el 20 oct 2026 el
+panel necesitaba `'unsafe-inline'` porque las plantillas tenían
+`<script>`, `<style>` y `onclick` inline. Ahora el CSS y el JS están en
+`internal/auth/static/` (`panel.css`, `theme-init.js` y `panel.js`), y
+`templates_test.go` impide que vuelva a entrar código inline. El panel ya tiene su
 propia cookie `HttpOnly` y la recomendación de ponerlo detrás de
 Cloudflare Access (ver [`panel-admin`](../panel-admin/design.md)).
 

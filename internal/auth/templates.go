@@ -8,13 +8,15 @@ import (
 //go:embed templates/*.html
 var templateFS embed.FS
 
-// staticFS holds the panel's static assets — today just the Logday
-// brand mark (logo.svg, the "server" variant from the Logday brand
-// system: mono white symbol on a dark rounded container, no accent —
-// see section 07 of the brand spec), served as both the panel's
-// favicon and its header logo.
+// staticFS holds the panel's static assets: the Logday brand mark
+// (logo.svg, the "server" variant from the Logday brand system: mono
+// white symbol on a dark rounded container, no accent — see section 07
+// of the brand spec), served as both the panel's favicon and its header
+// logo; and the panel's stylesheet and scripts, which live in files
+// instead of inline <style>/<script> so the panel's Content-Security-Policy
+// can be script-src/style-src 'self' (specs/cabeceras-seguridad/).
 //
-//go:embed static/*.svg
+//go:embed static/*.svg static/*.css static/*.js
 var staticFS embed.FS
 
 // parseTemplates parses every template under templates/ once, at
