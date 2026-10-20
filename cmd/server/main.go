@@ -86,6 +86,7 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(security.HeadersMiddleware)
 	if corsOrigins := parseCORSOrigins(os.Getenv("CORS_ALLOWED_ORIGINS")); len(corsOrigins) > 0 {
 		r.Use(security.CORSMiddleware(corsOrigins))
 	}
