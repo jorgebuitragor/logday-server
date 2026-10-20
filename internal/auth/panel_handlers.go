@@ -75,9 +75,10 @@ var panelStaticTypes = map[string]string{
 	"theme-init.js": "text/javascript; charset=utf-8",
 }
 
-// serveStatic serves the panel's stylesheet and scripts. Short cache
-// (unlike the logo): the file names aren't content-hashed, and after a
-// binary upgrade the panel must pick up the new CSS/JS right away.
+// serveStatic serves the panel's stylesheet and scripts. Pages ask for
+// them with a content hash in the query ({{asset}} in templates.go), so
+// a new version always gets a new URL; the short cache is only a
+// fallback for anything that requests the bare path.
 func (h *Handler) serveStatic(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "file")
 	contentType, ok := panelStaticTypes[name]
@@ -554,6 +555,14 @@ func (h *Handler) panelRevokeDevice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) panelSettings(w http.ResponseWriter, r *http.Request) {
+	h.renderSettings(w, r, "")
+}
+
+// renderSettings draws the settings page. generatedSecret is only set
+// by panelGenerateSecret, which renders the page as the POST response
+// itself: the suggested secret never travels in a URL, so it doesn't
+// end up in browser history, Referer headers or access logs.
+func (h *Handler) renderSettings(w http.ResponseWriter, r *http.Request, generatedSecret string) {
 	cfg, err := settings.Get(r.Context(), h.store.db)
 	if err != nil {
 		httperr.Internal(w, r, err)
@@ -570,7 +579,7 @@ func (h *Handler) panelSettings(w http.ResponseWriter, r *http.Request) {
 		Settings:        *cfg,
 		Error:           r.URL.Query().Get("error"),
 		Success:         r.URL.Query().Get("success"),
-		GeneratedSecret: r.URL.Query().Get("generated_secret"),
+		GeneratedSecret: generatedSecret,
 		InstanceName:    cfg.InstanceName,
 	})
 }
@@ -714,5 +723,6 @@ func (h *Handler) panelGenerateSecret(w http.ResponseWriter, r *http.Request) {
 		httperr.Internal(w, r, err)
 		return
 	}
-	http.Redirect(w, r, "/admin/panel/settings?generated_secret="+url.QueryEscape(raw), http.StatusFound)
+	w.Header().Set("Cache-Control", "no-store")
+	h.renderSettings(w, r, raw)
 }

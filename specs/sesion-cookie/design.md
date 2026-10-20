@@ -118,7 +118,9 @@ tossing desde subdominios hermanos), la cookie gana sobre el body
 (migración con dos pestañas), el margen de reuso (recarga durante un
 refresh), el logout con un token ya rotado, el login que reemplaza la
 sesión anterior, `COOKIE_SECURE=always` y un test de CORS que fija el
-invariante del que depende la defensa CSRF. Quedan documentados sin
-cambio: el access token (JWT sin estado) sigue valiendo hasta 15 min
-tras el logout, y el export de cuenta incluye el hash del refresh
-token.
+invariante del que depende la defensa CSRF. Quedaron documentados sin
+cambio en ese momento, y se resolvieron después (20 oct 2026): el access
+token sigue valiendo hasta 15 min tras el logout (ahora `RequireAuth`
+comprueba que el device exista, ver specs/auth-multiusuario/design.md), y
+el export de cuenta incluye el hash del refresh token (ahora se quita de
+`devices` al exportar).

@@ -765,22 +765,23 @@ func TestPanelSettingsPage(t *testing.T) {
 		t.Fatalf("expected min_password_length=2 to be rejected with an error redirect, got Location=%q", respBad.Header.Get("Location"))
 	}
 
-	// Generate-secret redirects back with a suggested value, shown
-	// once in the readonly field — never persisted anywhere.
+	// Generate-secret answers the POST with the settings page itself,
+	// showing the suggested value once in the readonly field. It must
+	// never travel in a URL (history, Referer, access logs) nor be
+	// cached.
 	resp3 := postForm(t, client, srv, "/admin/panel/settings/generate-secret",
 		url.Values{"csrf_token": {csrfFor("/admin/panel/settings")}})
+	genBody, _ := io.ReadAll(resp3.Body)
 	_ = resp3.Body.Close()
-	loc := resp3.Header.Get("Location")
-	if resp3.StatusCode != http.StatusFound || !strings.Contains(loc, "generated_secret=") {
-		t.Fatalf("generate-secret: expected 302 with generated_secret in Location, got %d Location=%q", resp3.StatusCode, loc)
+	if resp3.StatusCode != http.StatusOK {
+		t.Fatalf("generate-secret: expected 200 with the page, got %d Location=%q", resp3.StatusCode, resp3.Header.Get("Location"))
 	}
-
-	genResp, err := client.Get(srv.URL + loc)
-	if err != nil {
-		t.Fatalf("following generate-secret redirect: %v", err)
+	if loc := resp3.Header.Get("Location"); strings.Contains(loc, "secret") {
+		t.Fatalf("generate-secret: the secret must not travel in a URL, got Location=%q", loc)
 	}
-	genBody, _ := io.ReadAll(genResp.Body)
-	_ = genResp.Body.Close()
+	if cc := resp3.Header.Get("Cache-Control"); cc != "no-store" {
+		t.Fatalf("generate-secret: expected Cache-Control no-store, got %q", cc)
+	}
 	if !strings.Contains(string(genBody), `id="generated-secret"`) {
 		t.Fatalf("expected the generated secret field to render, got:\n%s", genBody)
 	}

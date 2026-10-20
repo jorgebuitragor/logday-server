@@ -73,3 +73,41 @@ func TestServeStaticAllowlist(t *testing.T) {
 		}
 	}
 }
+
+// Cloudflare caches /admin/static/* for hours whatever the server says,
+// keyed by full URL. Pages must ask for each static file with its
+// content hash, so a deploy that changes a page and its script together
+// can't be served the old script; and no template may skip {{asset}}.
+func TestPanelTemplatesUseVersionedAssets(t *testing.T) {
+	versions := assetVersions()
+	tmpl := parseTemplates()
+	var b strings.Builder
+	if err := tmpl.ExecuteTemplate(&b, "login.html", formPageData{}); err != nil {
+		t.Fatalf("rendering login.html: %v", err)
+	}
+	html := b.String()
+	for _, name := range []string{"panel.css", "panel.js", "theme-init.js", "logo.svg"} {
+		want := "/admin/static/" + name + "?v=" + versions[name]
+		if !strings.Contains(html, want) {
+			t.Errorf("login page should reference %s, got:\n%s", want, html)
+		}
+	}
+
+	bare := regexp.MustCompile(`"/admin/static/[^"?{]+"`)
+	err := fs.WalkDir(templateFS, "templates", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, err := templateFS.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if m := bare.FindString(string(data)); m != "" {
+			t.Errorf("%s: static file without {{asset}}: %s", path, m)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

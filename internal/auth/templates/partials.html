@@ -2,19 +2,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{if .InstanceName}}{{.InstanceName}}{{else}}Logday Server{{end}} — Admin</title>
-<link rel="icon" type="image/svg+xml" href="/admin/static/logo.svg">
-<link rel="stylesheet" href="/admin/static/panel.css">
+<link rel="icon" type="image/svg+xml" href="{{asset "logo.svg"}}">
+<link rel="stylesheet" href="{{asset "panel.css"}}">
 {{/* Estilos y scripts en archivos (no inline) para que la CSP del panel
      sea script-src/style-src 'self' sin 'unsafe-inline'. theme-init.js
      va bloqueante, antes del primer pintado; panel.js con defer. */}}
-<script src="/admin/static/theme-init.js"></script>
-<script src="/admin/static/panel.js" defer></script>
+<script src="{{asset "theme-init.js"}}"></script>
+<script src="{{asset "panel.js"}}" defer></script>
 {{end}}
 
 {{define "nav"}}
 <header class="topbar">
   <div class="brand">
-    <img class="brand-logo" src="/admin/static/logo.svg" alt="Logday">
+    <img class="brand-logo" src="{{asset "logo.svg"}}" alt="Logday">
     <span class="brand-name">{{if .InstanceName}}{{.InstanceName}}{{else}}Logday Server{{end}}</span>
   </div>
   <nav class="tabs">
