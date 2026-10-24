@@ -104,6 +104,23 @@ func tombstoneWatermarks(ctx context.Context, tx *sql.Tx, cutoff string) (map[st
 	return watermarks, nil
 }
 
+// LatestSeq returns the last sync seq allocated to userID (0 if none
+// yet). It never decreases: NextSeq only ever increments it, so no
+// cursor this server handed out can be greater.
+func LatestSeq(ctx context.Context, database *sql.DB, userID string) (int64, error) {
+	var seq int64
+	err := database.QueryRowContext(ctx,
+		`SELECT next_seq FROM user_sync_counters WHERE user_id = ?`, userID,
+	).Scan(&seq)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("reading latest seq: %w", err)
+	}
+	return seq, nil
+}
+
 // PurgedBeforeSeq returns the seq below which userID's cursor is no
 // longer guaranteed complete — some tombstones with a seq at or above
 // this value were physically purged. 0 means nothing has been purged
