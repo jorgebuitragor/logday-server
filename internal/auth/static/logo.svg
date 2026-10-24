@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Logday Server">
+  <rect x="0" y="0" width="64" height="64" rx="15" fill="#121212" stroke="#4a4a4a" stroke-width="1.5"/>
+  <path d="M19 13.5h19L47 21.5V48.5a2 2 0 0 1-2 2H19a2 2 0 0 1-2-2V15.5a2 2 0 0 1 2-2z" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linejoin="round"/>
+  <path d="M38 13.5v8h9" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linejoin="round"/>
+  <path d="M20.5 36h4l3-8.5 4.5 13L43.5 25" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -300,7 +300,10 @@ encapsular en un constructor.
 /admin/panel/settings/generate-secret` genera un valor con
 `security.GenerateOpaqueToken` (misma primitiva que los refresh tokens
 opacos) y lo muestra una sola vez en un campo de solo lectura con botón de
-copiar — nunca se persiste ni se aplica en runtime. Rotar de verdad la
+copiar — nunca se persiste ni se aplica en runtime. La página se devuelve
+como respuesta del propio POST, con `Cache-Control: no-store`: el valor no
+viaja en la URL (antes iba en `?generated_secret=` tras un redirect, y
+quedaba en el historial del navegador y en los logs de acceso). Rotar de verdad la
 clave activa invalidaría todas las sesiones sin aviso y requeriría mover
 la raíz de confianza de JWT de variable de entorno a base de datos —
 decisión de arquitectura aparte, no tomada acá (ver "Fuera de este spec"

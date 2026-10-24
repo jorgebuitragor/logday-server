@@ -1,6 +1,6 @@
 # Esquema de datos — Requirements
 
-Estado: en diseño
+Estado: implementado — ver `design.md` y `tasks.md`.
 
 ## Contexto
 

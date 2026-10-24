@@ -284,3 +284,30 @@ func TestCreateFirstAdminConcurrentCallsOnlyOneWins(t *testing.T) {
 		t.Fatalf("expected exactly 1 user in the database, got %d", count)
 	}
 }
+
+// The refresh handler reads the device outside the rotation's
+// transaction, so two refreshes racing with the same token can both get
+// past that read. The second rotation must come back as reuse — before,
+// it hit the UNIQUE constraint on used_refresh_tokens and the handler
+// answered 500 without revoking the device.
+func TestRotateRefreshTokenTwiceWithTheSameOldHashIsReuse(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	member := mustCreateUser(t, s, ctx, "member@example.com", false)
+	d, err := s.createDevice(ctx, member.ID, "laptop", "hash-1", time.Now().Add(time.Hour), "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("createDevice: %v", err)
+	}
+
+	if err := s.rotateRefreshToken(ctx, d.ID, "hash-1", "hash-2", time.Now().Add(time.Hour), time.Hour, "127.0.0.1", "a"); err != nil {
+		t.Fatalf("first rotation: %v", err)
+	}
+	err = s.rotateRefreshToken(ctx, d.ID, "hash-1", "hash-3", time.Now().Add(time.Hour), time.Hour, "127.0.0.1", "b")
+	if !errors.Is(err, errRefreshTokenReused) {
+		t.Fatalf("second rotation with the same old hash: err = %v, want errRefreshTokenReused", err)
+	}
+	// The losing rotation must not have overwritten the winner's token.
+	if got, err := s.getDeviceByRefreshTokenHash(ctx, "hash-2"); err != nil || got.ID != d.ID {
+		t.Fatalf("winner's hash-2 should still be current: %v", err)
+	}
+}

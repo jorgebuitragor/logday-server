@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/jorgebuitragor/logday-server/internal/httperr"
 	"github.com/jorgebuitragor/logday-server/internal/security"
 	"github.com/jorgebuitragor/logday-server/internal/settings"
 )
@@ -35,12 +36,20 @@ func NewHandler(s *store, jwtSecret []byte) *Handler {
 func (h *Handler) Routes(r chi.Router) {
 	r.Post("/auth/login", h.login)
 	r.Post("/auth/refresh", h.refresh)
+	r.Post("/auth/logout", h.logout)
+	r.Get("/policy", h.policy)
 
 	r.Group(func(r chi.Router) {
 		r.Use(h.RequireAuth)
 
 		r.Get("/devices", h.listDevices)
 		r.Delete("/devices/{id}", h.revokeDevice)
+
+		r.Post("/policy/accept", h.acceptPolicy)
+		r.Post("/policy/accept-sensitive", h.acceptSensitiveData)
+
+		r.Get("/account/export", h.exportAccount)
+		r.Delete("/account", h.deleteAccount)
 
 		r.Group(func(r chi.Router) {
 			r.Use(h.RequireAdmin)
@@ -53,6 +62,28 @@ type tokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	DeviceID     string `json:"device_id"`
+	// PolicyVersion/PolicyAcceptedVersion: el cliente los compara para
+	// saber si mostrar el gate de consentimiento sin pegarle a GET
+	// /policy aparte en el camino crítico de login (ver
+	// specs/cumplimiento-datos-personales/). AcceptedVersion es nil si
+	// el usuario nunca aceptó nada todavía.
+	PolicyVersion         int  `json:"policy_version"`
+	PolicyAcceptedVersion *int `json:"policy_accepted_version"`
+	// SensitiveDataAccepted: evita que el cliente tenga que pegarle a
+	// otro endpoint solo para saber si ya mostró el aviso de dato
+	// sensible alguna vez.
+	SensitiveDataAccepted bool `json:"sensitive_data_accepted"`
+}
+
+func tokenResponseFor(access, refresh, deviceID string, cfg *settings.Settings, u *user) tokenResponse {
+	return tokenResponse{
+		AccessToken:           access,
+		RefreshToken:          refresh,
+		DeviceID:              deviceID,
+		PolicyVersion:         cfg.PrivacyPolicyVersion,
+		PolicyAcceptedVersion: u.PrivacyAcceptedVersion,
+		SensitiveDataAccepted: u.SensitiveDataAcceptedAt != nil,
+	}
 }
 
 type loginRequest struct {
@@ -91,14 +122,14 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 
 	cfg, err := settings.Get(r.Context(), h.store.db)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
 	if cfg.MaxDevicesPerUser > 0 {
 		count, err := h.store.countDevices(r.Context(), u.ID)
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			httperr.Internal(w, r, err)
 			return
 		}
 		if count >= cfg.MaxDevicesPerUser {
@@ -114,23 +145,48 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 
 	rawRefresh, refreshHash, err := security.GenerateOpaqueToken()
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
 	d, err := h.store.createDevice(r.Context(), u.ID, deviceName, refreshHash, time.Now().Add(cfg.RefreshTokenTTL()), clientIP(r), r.UserAgent())
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
 	access, err := issueAccessToken(h.jwtSecret, u.ID, d.ID, u.IsAdmin, cfg.AccessTokenTTL())
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, tokenResponse{AccessToken: access, RefreshToken: rawRefresh, DeviceID: d.ID})
+	if cookieMode(r) {
+		h.revokeCookieSessionOnLogin(r)
+		setRefreshCookie(w, r, rawRefresh, cfg.RefreshTokenTTL())
+		rawRefresh = ""
+	}
+	writeJSON(w, http.StatusOK, tokenResponseFor(access, rawRefresh, d.ID, cfg, u))
+}
+
+// refreshReuseLeeway: for this long after a refresh token is rotated,
+// presenting it again rotates the device's current token instead of
+// being treated as theft. Every page load of logday-web in cookie mode
+// refreshes, so a reload while a refresh is in flight (the server
+// committed the rotation but the browser never got the new cookie) or
+// two tabs racing would otherwise revoke a legitimate session. Same
+// idea as Auth0/Okta's refresh token "reuse interval". The trade-off:
+// a stolen token is still exchangeable within this window after the
+// legitimate rotation; after it, reuse revokes the device as before.
+var refreshReuseLeeway = 20 * time.Second // a var only so tests can shrink it
+
+// revokeIfReused revokes the device when hash belongs to an
+// already-rotated refresh token (outside the leeway): presenting it
+// again signals possible token theft.
+func (h *Handler) revokeIfReused(r *http.Request, hash string) {
+	if reused, err := h.store.wasRefreshTokenUsed(r.Context(), hash); err == nil && reused {
+		_ = h.store.revokeDeviceByUsedTokenHash(r.Context(), hash)
+	}
 }
 
 type refreshRequest struct {
@@ -138,65 +194,109 @@ type refreshRequest struct {
 }
 
 func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
-	var req refreshRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	token, err := refreshTokenFromRequest(r)
+	if err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if req.RefreshToken == "" {
+	if token == "" {
+		if cookieMode(r) {
+			// Cookie mode with no cookie: there is simply no session
+			// (first visit, logged out, or the cookie expired).
+			http.Error(w, "no session", http.StatusUnauthorized)
+			return
+		}
 		http.Error(w, "refresh_token is required", http.StatusBadRequest)
 		return
 	}
 
-	hash := security.HashOpaqueToken(req.RefreshToken)
-
-	d, err := h.store.getDeviceByRefreshTokenHash(r.Context(), hash)
-	if err != nil {
-		if errors.Is(err, errNotFound) {
-			if reused, checkErr := h.store.wasRefreshTokenUsed(r.Context(), hash); checkErr == nil && reused {
-				_ = h.store.revokeDeviceByUsedTokenHash(r.Context(), hash)
-			}
+	// A refresh token that doesn't work anymore must not stay in the
+	// browser's cookie jar, or every page load would retry it.
+	unauthorized := func(msg string) {
+		if cookieMode(r) {
+			clearRefreshCookie(w, r)
 		}
-		http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+		http.Error(w, msg, http.StatusUnauthorized)
+	}
+
+	hash := security.HashOpaqueToken(token)
+
+	// rotateFrom is the hash the rotation replaces: normally the one
+	// presented, but within the reuse leeway it's the device's current
+	// one (the presented token was already rotated moments ago).
+	d, err := h.store.getDeviceByRefreshTokenHash(r.Context(), hash)
+	rotateFrom := hash
+	if errors.Is(err, errNotFound) {
+		d, err = h.store.getDeviceRotatedWithin(r.Context(), hash, refreshReuseLeeway)
+		if err == nil {
+			rotateFrom = d.RefreshTokenHash
+		}
+	}
+	if err != nil {
+		h.revokeIfReused(r, hash)
+		unauthorized("invalid refresh token")
 		return
 	}
 
 	if time.Now().After(d.RefreshTokenExpiresAt) {
 		_ = h.store.deleteDevice(r.Context(), d.ID)
-		http.Error(w, "refresh token expired", http.StatusUnauthorized)
+		unauthorized("refresh token expired")
 		return
 	}
 
 	u, err := h.store.getUserByID(r.Context(), d.UserID)
 	if err != nil {
-		http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+		unauthorized("invalid refresh token")
 		return
 	}
 
 	cfg, err := settings.Get(r.Context(), h.store.db)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
 	newRaw, newHash, err := security.GenerateOpaqueToken()
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
-	if err := h.store.rotateRefreshToken(r.Context(), d.ID, hash, newHash, time.Now().Add(cfg.RefreshTokenTTL()), cfg.RefreshTokenTTL(), clientIP(r), r.UserAgent()); err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+	// Losing the compare-and-swap means another refresh of this same
+	// device rotated it a moment ago (two tabs, a reload during an
+	// in-flight refresh): that is within the leeway by definition, not
+	// theft, so retry from the device's new current hash instead of
+	// revoking. Bounded, because each loss means someone else won.
+	const maxRotationAttempts = 5
+	for attempt := 1; ; attempt++ {
+		err = h.store.rotateRefreshToken(r.Context(), d.ID, rotateFrom, newHash, time.Now().Add(cfg.RefreshTokenTTL()), cfg.RefreshTokenTTL(), clientIP(r), r.UserAgent())
+		if !errors.Is(err, errRefreshTokenReused) || attempt == maxRotationAttempts {
+			break
+		}
+		cur, lookupErr := h.store.getDeviceByID(r.Context(), d.ID)
+		if lookupErr != nil {
+			// Revoked meanwhile (logout, or reuse detected elsewhere).
+			unauthorized("invalid refresh token")
+			return
+		}
+		rotateFrom = cur.RefreshTokenHash
+	}
+	if err != nil {
+		httperr.Internal(w, r, err)
 		return
 	}
 
 	access, err := issueAccessToken(h.jwtSecret, u.ID, d.ID, u.IsAdmin, cfg.AccessTokenTTL())
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, tokenResponse{AccessToken: access, RefreshToken: newRaw, DeviceID: d.ID})
+	if cookieMode(r) {
+		setRefreshCookie(w, r, newRaw, cfg.RefreshTokenTTL())
+		newRaw = ""
+	}
+	writeJSON(w, http.StatusOK, tokenResponseFor(access, newRaw, d.ID, cfg, u))
 }
 
 type deviceResponse struct {
@@ -215,7 +315,7 @@ func (h *Handler) listDevices(w http.ResponseWriter, r *http.Request) {
 
 	devices, err := h.store.listDevices(r.Context(), userID)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
@@ -235,10 +335,117 @@ func (h *Handler) revokeDevice(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "device not found", http.StatusNotFound)
 			return
 		}
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── Política de tratamiento de datos ────────────────────────────────
+// Ver specs/cumplimiento-datos-personales/. GET /policy es público a
+// propósito — un cliente necesita poder mostrar el texto antes de que
+// el usuario decida si quiere usar ese servidor, no solo después de
+// loguearse.
+
+type policyResponse struct {
+	Text    string `json:"text"`
+	Version int    `json:"version"`
+}
+
+func (h *Handler) policy(w http.ResponseWriter, r *http.Request) {
+	cfg, err := settings.Get(r.Context(), h.store.db)
+	if err != nil {
+		httperr.Internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, policyResponse{Text: cfg.PrivacyPolicyText, Version: cfg.PrivacyPolicyVersion})
+}
+
+type acceptPolicyRequest struct {
+	Version int `json:"version"`
+}
+
+func (h *Handler) acceptPolicy(w http.ResponseWriter, r *http.Request) {
+	userID, _ := UserIDFromContext(r.Context())
+
+	var req acceptPolicyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.store.acceptPolicy(r.Context(), userID, req.Version); err != nil {
+		if errors.Is(err, errStalePolicyVersion) {
+			http.Error(w, "policy version is out of date, fetch it again", http.StatusConflict)
+			return
+		}
+		httperr.Internal(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) acceptSensitiveData(w http.ResponseWriter, r *http.Request) {
+	userID, _ := UserIDFromContext(r.Context())
+
+	if err := h.store.acceptSensitiveData(r.Context(), userID); err != nil {
+		httperr.Internal(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── Derechos del titular ─────────────────────────────────────────────
+
+func (h *Handler) exportAccount(w http.ResponseWriter, r *http.Request) {
+	userID, _ := UserIDFromContext(r.Context())
+
+	data, err := h.store.exportUserData(r.Context(), userID)
+	if err != nil {
+		httperr.Internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+type deleteAccountRequest struct {
+	Password string `json:"password"`
+}
+
+// deleteAccount exige la contraseña actual en el body (no solo el
+// access token) — mismo criterio que cualquier otra acción
+// irreversible ya en la app (ver specs/cumplimiento-datos-personales/
+// design.md): un access token robado/filtrado no alcanza para borrar
+// una cuenta entera.
+func (h *Handler) deleteAccount(w http.ResponseWriter, r *http.Request) {
+	userID, _ := UserIDFromContext(r.Context())
+
+	var req deleteAccountRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	u, err := h.store.getUserByID(r.Context(), userID)
+	if err != nil {
+		httperr.Internal(w, r, err)
+		return
+	}
+	match, err := security.VerifyPassword(req.Password, u.PasswordHash)
+	if err != nil || !match {
+		http.Error(w, "invalid password", http.StatusUnauthorized)
+		return
+	}
+
+	if err := h.store.deleteUserAccount(r.Context(), userID); err != nil {
+		if errors.Is(err, errLastAdmin) {
+			http.Error(w, "cannot delete the only admin account", http.StatusConflict)
+			return
+		}
+		httperr.Internal(w, r, err)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -272,7 +479,7 @@ func (h *Handler) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	cfg, err := settings.Get(r.Context(), h.store.db)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	if len(req.Password) < cfg.MinPasswordLength {
@@ -286,7 +493,7 @@ func (h *Handler) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	hash, err := security.HashPassword(req.Password)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
@@ -296,7 +503,7 @@ func (h *Handler) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "email already exists", http.StatusConflict)
 			return
 		}
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 

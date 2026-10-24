@@ -721,6 +721,8 @@ func TestPanelSettingsPage(t *testing.T) {
 		"refresh_token_ttl_days":          {"7"},
 		"panel_session_ttl_hours":         {"2"},
 		"max_devices_per_user":            {"3"},
+		"privacy_policy_text":             {"Política de prueba."},
+		"privacy_policy_version":          {"2"},
 	})
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusFound || !strings.HasPrefix(resp.Header.Get("Location"), "/admin/panel/settings?success=") {
@@ -763,23 +765,103 @@ func TestPanelSettingsPage(t *testing.T) {
 		t.Fatalf("expected min_password_length=2 to be rejected with an error redirect, got Location=%q", respBad.Header.Get("Location"))
 	}
 
-	// Generate-secret redirects back with a suggested value, shown
-	// once in the readonly field — never persisted anywhere.
+	// Generate-secret answers the POST with the settings page itself,
+	// showing the suggested value once in the readonly field. It must
+	// never travel in a URL (history, Referer, access logs) nor be
+	// cached.
 	resp3 := postForm(t, client, srv, "/admin/panel/settings/generate-secret",
 		url.Values{"csrf_token": {csrfFor("/admin/panel/settings")}})
+	genBody, _ := io.ReadAll(resp3.Body)
 	_ = resp3.Body.Close()
-	loc := resp3.Header.Get("Location")
-	if resp3.StatusCode != http.StatusFound || !strings.Contains(loc, "generated_secret=") {
-		t.Fatalf("generate-secret: expected 302 with generated_secret in Location, got %d Location=%q", resp3.StatusCode, loc)
+	if resp3.StatusCode != http.StatusOK {
+		t.Fatalf("generate-secret: expected 200 with the page, got %d Location=%q", resp3.StatusCode, resp3.Header.Get("Location"))
 	}
-
-	genResp, err := client.Get(srv.URL + loc)
-	if err != nil {
-		t.Fatalf("following generate-secret redirect: %v", err)
+	if loc := resp3.Header.Get("Location"); strings.Contains(loc, "secret") {
+		t.Fatalf("generate-secret: the secret must not travel in a URL, got Location=%q", loc)
 	}
-	genBody, _ := io.ReadAll(genResp.Body)
-	_ = genResp.Body.Close()
+	if cc := resp3.Header.Get("Cache-Control"); cc != "no-store" {
+		t.Fatalf("generate-secret: expected Cache-Control no-store, got %q", cc)
+	}
 	if !strings.Contains(string(genBody), `id="generated-secret"`) {
 		t.Fatalf("expected the generated secret field to render, got:\n%s", genBody)
+	}
+}
+
+// TestPanelSettingsRequiresPolicyVersionBumpOnTextChange covers a gap
+// found in review: without this, an admin could edit the policy text
+// and leave the version unchanged, so any user whose
+// privacy_accepted_version already matched would silently never see
+// the new text — the whole point of versioning the policy.
+func TestPanelSettingsRequiresPolicyVersionBumpOnTextChange(t *testing.T) {
+	srv, _, authStore := setupPanelServer(t)
+	mustCreatePanelAdmin(t, authStore, "admin@example.com", "correct-horse-battery")
+
+	client := newPanelClient(t)
+	loginToPanel(t, client, srv, "admin@example.com", "correct-horse-battery")
+
+	csrfFor := func(path string) string {
+		body, _ := getAndScrapeCSRF(t, client, srv, path)
+		return scrapeCSRF(t, body)
+	}
+
+	baseForm := func(policyText, policyVersion string) url.Values {
+		return url.Values{
+			"csrf_token":                      {csrfFor("/admin/panel/settings")},
+			"instance_name":                   {"Test"},
+			"tombstone_retention_days":        {"90"},
+			"login_rate_limit_attempts":       {"5"},
+			"login_rate_limit_window_seconds": {"60"},
+			"allowed_email_domains":           {""},
+			"min_password_length":             {"8"},
+			"access_token_ttl_minutes":        {"15"},
+			"refresh_token_ttl_days":          {"30"},
+			"panel_session_ttl_hours":         {"24"},
+			"max_devices_per_user":            {"0"},
+			"privacy_policy_text":             {policyText},
+			"privacy_policy_version":          {policyVersion},
+		}
+	}
+
+	// Setea una versión base real (2), con texto distinto al default
+	// sembrado por la migración, para tener algo que comparar después.
+	setup := postForm(t, client, srv, "/admin/panel/settings", baseForm("Texto v2.", "2"))
+	_ = setup.Body.Close()
+	if !strings.Contains(setup.Header.Get("Location"), "success=") {
+		t.Fatalf("seeding version 2: expected success redirect, got Location=%q", setup.Header.Get("Location"))
+	}
+
+	// Mismo texto, misma versión: no es un cambio real, se acepta.
+	sameText := postForm(t, client, srv, "/admin/panel/settings", baseForm("Texto v2.", "2"))
+	_ = sameText.Body.Close()
+	if !strings.Contains(sameText.Header.Get("Location"), "success=") {
+		t.Fatalf("resubmitting unchanged text/version: expected success redirect, got Location=%q", sameText.Header.Get("Location"))
+	}
+
+	// Texto distinto, versión igual o menor: rechazado.
+	sameVersion := postForm(t, client, srv, "/admin/panel/settings", baseForm("Texto v3, cambiado.", "2"))
+	_ = sameVersion.Body.Close()
+	if !strings.Contains(sameVersion.Header.Get("Location"), "error=") {
+		t.Fatalf("changing text without bumping version: expected error redirect, got Location=%q", sameVersion.Header.Get("Location"))
+	}
+
+	// Texto distinto, versión mayor: aceptado.
+	bumped := postForm(t, client, srv, "/admin/panel/settings", baseForm("Texto v3, cambiado.", "3"))
+	_ = bumped.Body.Close()
+	if !strings.Contains(bumped.Header.Get("Location"), "success=") {
+		t.Fatalf("changing text with a bumped version: expected success redirect, got Location=%q", bumped.Header.Get("Location"))
+	}
+
+	// Un texto con varias líneas, reenviado tal cual lo manda un
+	// navegador (\r\n en el <textarea>), no es un cambio: antes cualquier
+	// guardado del panel exigía subir la versión.
+	multiline := postForm(t, client, srv, "/admin/panel/settings", baseForm("Línea uno.\nLínea dos.", "4"))
+	_ = multiline.Body.Close()
+	if !strings.Contains(multiline.Header.Get("Location"), "success=") {
+		t.Fatalf("seeding multi-line text: expected success redirect, got Location=%q", multiline.Header.Get("Location"))
+	}
+	crlf := postForm(t, client, srv, "/admin/panel/settings", baseForm("Línea uno.\r\nLínea dos.", "4"))
+	_ = crlf.Body.Close()
+	if !strings.Contains(crlf.Header.Get("Location"), "success=") {
+		t.Fatalf("resubmitting the same text with browser CRLF newlines: expected success redirect, got Location=%q", crlf.Header.Get("Location"))
 	}
 }

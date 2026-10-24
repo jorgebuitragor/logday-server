@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -19,8 +20,10 @@ import (
 	"github.com/jorgebuitragor/logday-server/internal/note"
 	"github.com/jorgebuitragor/logday-server/internal/overtime"
 	"github.com/jorgebuitragor/logday-server/internal/realtime"
+	"github.com/jorgebuitragor/logday-server/internal/security"
 	"github.com/jorgebuitragor/logday-server/internal/sync"
 	"github.com/jorgebuitragor/logday-server/internal/task"
+	logdayweb "github.com/jorgebuitragor/logday-server/web"
 )
 
 func main() {
@@ -83,6 +86,10 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(security.HeadersMiddleware)
+	if corsOrigins := parseCORSOrigins(os.Getenv("CORS_ALLOWED_ORIGINS")); len(corsOrigins) > 0 {
+		r.Use(security.CORSMiddleware(corsOrigins))
+	}
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		if err := database.PingContext(r.Context()); err != nil {
@@ -105,6 +112,7 @@ func main() {
 	dailyEntryHandler.Routes(r)
 	syncHandler.Routes(r)
 	realtimeHandler.Routes(r)
+	logdayweb.Routes(r)
 
 	server := &http.Server{
 		Addr:              addr,
@@ -123,6 +131,19 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// parseCORSOrigins splits a comma-separated CORS_ALLOWED_ORIGINS value
+// into trimmed, non-empty origins. An empty/unset value yields nil,
+// which keeps CORSMiddleware unregistered entirely (see main()).
+func parseCORSOrigins(raw string) []string {
+	var origins []string
+	for _, o := range strings.Split(raw, ",") {
+		if o = strings.TrimSpace(o); o != "" {
+			origins = append(origins, o)
+		}
+	}
+	return origins
 }
 
 // runTombstonePurge runs db.PurgeTombstones once at startup and then

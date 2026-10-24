@@ -1,6 +1,6 @@
 # Auth multi-usuario — Tareas
 
-Estado: en diseño
+Estado: implementado (v1) — ver `design.md` y `requirements.md`.
 
 - [x] Decidir algoritmo de hash de password (argon2id).
 - [x] Decidir modelo de tokens (JWT access de 15 min + refresh

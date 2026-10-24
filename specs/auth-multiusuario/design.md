@@ -60,10 +60,14 @@ migración de esquema.
 - `GET /devices` — lista los dispositivos del usuario autenticado
   (nombre, última actividad).
 - `DELETE /devices/:id` — invalida el refresh token de ese dispositivo
-  de inmediato. El access token ya emitido para ese dispositivo sigue
-  siendo válido hasta que expire por sí solo (máx. 15 min) — no hay
-  revocación instantánea de access tokens sin mantener una blacklist.
-  Se acepta esta ventana de 15 min como trade-off de simplicidad.
+  de inmediato. **Desde el 20 oct 2026 también corta el access token al
+  instante:** `RequireAuth` (y la autenticación del WebSocket) comprueba,
+  además de la firma y la expiración del JWT, que el `device_id` del
+  token siga existiendo en `devices`. Es una consulta por clave primaria
+  por request, sin blacklist. Antes se aceptaba una ventana de hasta
+  15 min tras un logout o una revocación. Un WebSocket ya autenticado
+  sigue abierto hasta que se cierre; el siguiente request REST del
+  cliente ya recibe 401.
 
 ## Rate limiting de login
 

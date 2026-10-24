@@ -88,6 +88,8 @@ tags:
     description: Endpoints sin autenticación para operar la instancia.
   - name: Auth
     description: Login, refresh y gestión de dispositivos/sesiones propias.
+  - name: Privacidad
+    description: Política de tratamiento de datos y derechos del titular (exportar/eliminar mis datos).
   - name: Admin
     description: Endpoints que requieren un usuario con `is_admin = true`.
   - name: Sync
@@ -139,7 +141,17 @@ paths:
       operationId: login
       tags: [Auth]
       summary: Login y creación de un nuevo dispositivo/sesión
+      description: |
+        Con `X-Logday-Session: cookie` (modo cookie, solo para un navegador en
+        el mismo origen, como Logday Web embebida) el refresh token no viene en
+        el JSON: se entrega en una cookie `HttpOnly` y `SameSite=Strict`
+        (`__Host-logday_refresh` con `Path=/` por HTTPS; `logday_refresh` con
+        `Path=/auth` por HTTP plano). Si el navegador ya tenía una cookie de
+        sesión válida, ese dispositivo anterior se revoca. Ver
+        `specs/sesion-cookie/`.
       security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionMode"
       requestBody:
         required: true
         content:
@@ -148,7 +160,7 @@ paths:
               $ref: "#/components/schemas/LoginRequest"
       responses:
         "200":
-          description: Login exitoso. Guardar `refresh_token` y `device_id` de forma persistente en el cliente.
+          description: Login exitoso. Guardar `refresh_token` y `device_id` de forma persistente en el cliente. En modo cookie, `refresh_token` llega vacío y el token va en la cookie.
           content:
             application/json:
               schema:
@@ -186,9 +198,22 @@ paths:
         El refresh token devuelto reemplaza al usado en la request — descartar
         el anterior. Reusar un refresh token ya rotado revoca el dispositivo
         (se trata como indicio de robo de token), invalidando toda la sesión.
+
+        En modo cookie (`X-Logday-Session: cookie`) el body es opcional: el
+        token se toma de la cookie de sesión y la respuesta rota la cookie,
+        con `refresh_token` vacío en el JSON. Solo si no hay cookie se usa un
+        `refresh_token` del body (migración de un cliente que lo tenía
+        guardado antes del modo cookie). Sin la cabecera, la cookie se ignora.
+
+        Durante 20 s tras una rotación, presentar el token recién rotado rota
+        el token vigente del dispositivo en vez de revocarlo (recarga durante
+        un refresh en vuelo, pestañas en carrera). Pasado ese margen, el reuso
+        revoca el dispositivo.
       security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionMode"
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
@@ -203,12 +228,39 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
-          description: Refresh token inválido, ya usado (y por lo tanto revocado) o expirado.
+          description: Refresh token inválido, ya usado (y por lo tanto revocado) o expirado. En modo cookie también cuando no hay cookie (`no session`); si la cookie no sirve, la respuesta la borra.
           content:
             text/plain:
               schema:
                 type: string
                 example: invalid refresh token
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [Auth]
+      summary: Cierra la sesión del refresh token presentado
+      description: |
+        Revoca el dispositivo al que pertenece el refresh token (mismo efecto que
+        `DELETE /devices/{id}`), también si el token ya estaba rotado, y, en
+        modo cookie, borra la cookie de sesión, que los scripts de la página no
+        pueden tocar. El token
+        se toma del body o, en modo cookie, de la cookie. Siempre responde 204,
+        también con un token desconocido o ya revocado.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionMode"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "204":
+          description: Sesión cerrada (o ya no existía).
+        "400":
+          $ref: "#/components/responses/BadRequest"
 
   /devices:
     get:
@@ -247,6 +299,121 @@ paths:
               schema:
                 type: string
                 example: device not found
+
+  /policy:
+    get:
+      operationId: getPolicy
+      tags: [Privacidad]
+      summary: Política de tratamiento de datos vigente
+      description: Sin autenticación — un cliente la necesita para mostrarla antes de que el usuario haya iniciado sesión.
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PolicyResponse"
+
+  /policy/accept:
+    post:
+      operationId: acceptPolicy
+      tags: [Privacidad]
+      summary: Acepta la política de tratamiento de datos
+      description: |
+        `version` debe coincidir con la versión vigente (`GET /policy`) al
+        momento de aceptar — si un admin subió la versión mientras tanto,
+        responde `409` y el cliente debe volver a pedir `GET /policy` antes
+        de reintentar.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcceptPolicyRequest"
+      responses:
+        "204":
+          description: Aceptada.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: La versión enviada quedó desactualizada.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: policy version is out of date, fetch it again
+
+  /policy/accept-sensitive:
+    post:
+      operationId: acceptSensitiveData
+      tags: [Privacidad]
+      summary: Acepta el tratamiento de datos sensibles (ej. incapacidad en Ausencias)
+      description: Consentimiento separado del general — se pide la primera vez que el usuario va a guardar un dato sensible (ver `specs/cumplimiento-datos-personales`), no al loguearse.
+      responses:
+        "204":
+          description: Aceptado.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /account/export:
+    get:
+      operationId: exportAccount
+      tags: [Privacidad]
+      summary: Exporta todos los datos del usuario autenticado
+      description: Derecho de acceso del titular — vuelca cada tabla de dominio (tasks, notes, overtime, calendar, absences, daily entries) más `devices` (nombre/IP/timestamps de sesiones), todo filtrado por el usuario autenticado.
+      responses:
+        "200":
+          description: OK. Forma libre (un objeto por tabla, cada uno un array de filas) — no tiene un schema fijo, refleja las columnas reales de cada tabla.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /account:
+    delete:
+      operationId: deleteAccount
+      tags: [Privacidad]
+      summary: Elimina permanentemente la cuenta del usuario autenticado
+      description: |
+        Exige la contraseña actual en el body (no alcanza con el access
+        token) — mismo criterio que cualquier otra acción irreversible.
+        Borra en cascada todas las tablas de dominio, dispositivos y
+        refresh tokens.
+
+        Rechaza con `409` si el usuario es el único admin activo de la
+        instancia (mismo guard que degradar/dar de baja al último admin
+        desde el panel) — evitar que la instancia se quede sin ningún
+        admin, o que se reabra `/setup` sin autenticación.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteAccountRequest"
+      responses:
+        "204":
+          description: Cuenta eliminada.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Falta el header `Authorization`, o la contraseña enviada es incorrecta.
+          content:
+            text/plain:
+              schema:
+                type: string
+        "409":
+          description: El usuario es el único admin activo de la instancia.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: cannot delete the only admin account
 
   /admin/users:
     post:
@@ -305,6 +472,20 @@ paths:
             format: int64
             minimum: 0
             default: 0
+        - name: limit
+          in: query
+          description: |
+            Tope opcional de cambios devueltos en esta respuesta (los de `seq`
+            más bajo primero). Omitir (o `0`) trae todo el delta sin paginar —
+            el comportamiento de siempre, sin ningún límite aplicado por
+            default. Si la respuesta viene con exactamente `limit` elementos,
+            puede haber más: repetir la consulta con `since` = el `seq` del
+            último elemento recibido hasta que llegue una página más corta que
+            `limit` (o vacía).
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
       responses:
         "200":
           description: OK — puede ser un array vacío si no hay cambios.
@@ -315,7 +496,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/SyncChange"
         "400":
-          description: "`since` no es un entero válido o es negativo."
+          description: "`since` o `limit` no son un entero válido, o son negativos."
           content:
             text/plain:
               schema:
@@ -1086,6 +1267,18 @@ components:
       description: "Access token devuelto por `/auth/login` o `/auth/refresh`, enviado como `Authorization: Bearer <access_token>`."
 
   parameters:
+    SessionMode:
+      name: X-Logday-Session
+      in: header
+      required: false
+      description: |
+        `cookie` activa el modo cookie: el refresh token viaja solo en la cookie
+        `HttpOnly` `logday_refresh`. Pensado para un navegador servido en el mismo
+        origen (Logday Web embebida). Es también la defensa CSRF: la cookie solo
+        se lee si esta cabecera viene en el pedido.
+      schema:
+        type: string
+        enum: [cookie]
     ResourceId:
       name: id
       in: path
@@ -1160,9 +1353,44 @@ components:
           description: "JWT de corta duración (TTL configurable por el admin). Enviar como `Authorization: Bearer <access_token>`."
         refresh_token:
           type: string
-          description: Token opaco de larga duración. Guardar de forma segura — reemplaza al anterior en cada `/auth/refresh`.
+          description: "Token opaco de larga duración. Guardar de forma segura — reemplaza al anterior en cada `/auth/refresh`. Vacío en modo cookie (`X-Logday-Session: cookie`), donde viaja en la cookie `logday_refresh`."
         device_id:
           type: string
+        policy_version:
+          type: integer
+          description: Versión vigente de la política de tratamiento de datos, para comparar contra `policy_accepted_version` sin un round-trip extra a `GET /policy`.
+        policy_accepted_version:
+          type: integer
+          nullable: true
+          description: Última versión que este usuario aceptó, o `null` si nunca aceptó ninguna. Si es distinta de `policy_version`, el cliente debe mostrar el gate de consentimiento.
+        sensitive_data_accepted:
+          type: boolean
+          description: Si el usuario ya aceptó el consentimiento de datos sensibles (ver `POST /policy/accept-sensitive`).
+
+    PolicyResponse:
+      type: object
+      properties:
+        text:
+          type: string
+          description: Texto completo de la política vigente.
+        version:
+          type: integer
+
+    AcceptPolicyRequest:
+      type: object
+      required: [version]
+      properties:
+        version:
+          type: integer
+          description: Versión que el usuario está aceptando — debe coincidir con la vigente.
+
+    DeleteAccountRequest:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+          format: password
 
     Device:
       type: object

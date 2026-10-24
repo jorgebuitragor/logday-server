@@ -1,9 +1,10 @@
 # Sync incremental — Diseño
 
-Estado: en progreso — `GET /sync/changes`, el WebSocket de tiempo real
-y la purga de tombstones con invalidación de cursor (`410`)
-implementados (ver `internal/sync/`, `internal/realtime/`,
-`internal/db/purge.go`); CRDT y paginación siguen sin construir.
+Estado: implementado — `GET /sync/changes` (con paginación vía
+`limit`), el WebSocket de tiempo real y la purga de tombstones con
+invalidación de cursor (`410`) implementados (ver `internal/sync/`,
+`internal/realtime/`, `internal/db/purge.go`). Ver "CRDT dentro de
+`data`" y "Paginación" abajo.
 
 ## Cursor: secuencia monótona por usuario
 
@@ -43,6 +44,43 @@ En los tres casos:
   entidad — se reconsiderará si en la práctica escribir entidad por
   entidad resulta costoso (p. ej. un cliente que necesita mandar 50
   cambios tras reconectar).
+
+## Paginación: `limit`, opcional y sin default
+
+`GET /sync/changes?since=<seq>&limit=<n>` — `limit` acota la respuesta
+a como mucho `n` cambios (los de `seq` más bajo primero, ya viene
+ordenado así). **Sin `limit` (o `0`), el comportamiento es el de
+siempre: sin paginar, trae todo el delta en una sola respuesta** — a
+propósito, para que ningún cliente (viejo o uno que todavía no existe,
+mobile/extensión) pierda datos en silencio por un límite que no pidió.
+
+**Por qué hacía falta**: un full-resync (`since=0`, o un `since`
+rechazado con `410` por estar debajo del watermark de purga) trae
+*todo* el historial de una sola vez. Las filas de tipo `note`/
+`daily_entry` llevan `content_state` (snapshot Yjs completo en
+base64) — con cientos de notas largas ese payload único puede pesar
+varios MB. `task-manager` y `logday-web` piden páginas de 500 y
+recorren el resultado en loop hasta que llega una página más corta que
+el límite pedido (o vacía) — ver sus specs de sync respectivos.
+
+**Implementación — trunca después del merge, no `LIMIT` por tabla**:
+`changesSince` (`internal/sync/store.go`) sigue trayendo *todas* las
+filas de las 7 entidades desde `since`, como siempre (ningún
+`ChangesSince` de dominio cambió) — el truncado a `limit` pasa recién
+sobre el slice ya mergeado y ordenado por `seq`, antes de devolverlo.
+**Limitación aceptada**: esto acota el tamaño de la respuesta HTTP,
+pero no el costo de la query — cada llamada paginada sigue
+consultando las 7 tablas completas desde `since`. Hacerlo de verdad a
+nivel SQL (un `UNION` cross-tabla con su propio `LIMIT`) es una
+reescritura más grande del fan-out que no se justifica sin evidencia
+de que el costo de la query en sí (no el tamaño de la respuesta) sea
+un problema real — mismo criterio que la retención indefinida de
+soft-deletes en `specs/papelera-compartida`: se revisita con datos
+concretos, no preventivamente.
+
+**Sin `has_more` ni cambio de forma en la respuesta**: sigue siendo el
+mismo array JSON de siempre. El cliente infiere "puede haber más"
+comparando `len(devuelto) == limit` pedido.
 
 ## Endpoint unificado
 
@@ -172,11 +210,21 @@ Implementado en `internal/realtime/` (`GET /ws`).
   garantiza que reconectar usa el mismo `GET /sync/changes` que la
   notificación en vivo.
 
-## Explícitamente pendiente
+## CRDT dentro de `data` — snapshot resuelto, no binario crudo
 
-- Paginación de `/sync/changes` (probablemente `limit` + el `seq` del
-  último elemento como cursor de página, reutilizando el mismo campo).
-- Cómo viajan los updates CRDT de `yrs` dentro del campo `data` de un
-  cambio de tipo `note`/`daily_entry` (payload binario vs. snapshot
-  resuelto) — ver decisión de CRDT en
-  [`arquitectura-inicial/design.md`](../arquitectura-inicial/design.md).
+Ya implementado, nunca se había documentado acá. Cada cambio de tipo
+`note`/`daily_entry` incluye en `data` los mismos campos que cualquier
+otra lectura de esa entidad: `content` (texto plano, derivado) y
+`content_state` (snapshot Yjs completo en base64) — nunca el update
+binario incremental ni el campo interno `content_crdt`
+(`json:"-"`, nunca serializado). `scanNote`
+(`internal/note/store.go`)/su equivalente en
+`internal/dailyentry/store.go` decodifican `content_crdt` a
+`Content`/`ContentState` en cada lectura, incluida `ChangesSince` — es
+el mismo código que ya usan `POST /notes/:id/content` y
+`GET /notes`, no una rama especial para sync. Un cliente que recibe un
+cambio de nota por `/sync/changes` hidrata un `Y.Doc` nuevo desde
+`content_state` (`Y.applyUpdate`) exactamente igual que al abrir la
+nota por primera vez — confirmado funcionando así en `task-manager` y
+`logday-web` (`src/lib/yText.ts`/`hydrateFromState`). No hace falta
+ningún cambio ni protocolo nuevo.

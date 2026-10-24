@@ -1,6 +1,6 @@
 # Convenciones de código — Tareas
 
-Estado: en diseño
+Estado: implementado
 
 - [x] Decidir organización de paquetes (vertical por dominio bajo
       `internal/`).
@@ -27,5 +27,19 @@ Estado: en diseño
       devolviendo un sub-router — `chi.Mount` hace panic si dos
       routers se montan en el mismo path (bug real encontrado al
       integrar `task` junto a `auth`).
-- [ ] Decidir convenciones de logging y manejo de errores (diferido a
-      la primera feature real).
+- [x] Decidir convenciones de logging y manejo de errores: ya eran
+      consistentes de facto en los 9 paquetes de dominio, nunca se
+      habían escrito. `log` estándar sin librería estructurada;
+      wrapping `fmt.Errorf("<acción>: %w", err)` en el store;
+      centinelas de negocio (`errNotFound`/`errForbidden`/
+      `errConflict`, sin exportar) mapeados a HTTP en el handler vía
+      `errors.Is`; validación de entrada como `errors.New` plano
+      desde `validate<X>Request`, distinto de los centinelas. Ver
+      `design.md`. Gap real documentado (no resuelto): el `default`
+      de cada mapeo no loguea el error antes del `500`.
+- [x] Loguear el error real de cada `500` (19 oct 2026):
+      `internal/httperr.Internal` y los 75 sitios de los 8 paquetes que responden 500
+      cambiados a la vez. Cada sitio está dentro de un `if err != nil`,
+      así que se loguea el error que causó el 500. Test en
+      `internal/httperr`: loguea método, ruta y error, y no filtra el
+      error al cliente ni la query string al log.

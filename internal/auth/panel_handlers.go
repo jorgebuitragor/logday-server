@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/jorgebuitragor/logday-server/internal/httperr"
 	"github.com/jorgebuitragor/logday-server/internal/security"
 	"github.com/jorgebuitragor/logday-server/internal/settings"
 )
@@ -22,7 +23,8 @@ import (
 // unambiguous when reading route registrations. Like Routes, it
 // registers directly on r (no sub-router / chi.Mount).
 func (h *Handler) PanelRoutes(r chi.Router) {
-	r.Get("/admin/static/logo.png", h.serveLogo)
+	r.Get("/admin/static/logo.svg", h.serveLogo)
+	r.Get("/admin/static/{file}", h.serveStatic)
 
 	r.Get("/setup", h.setupForm)
 	r.Post("/setup", h.setupSubmit)
@@ -54,13 +56,44 @@ func (h *Handler) PanelRoutes(r chi.Router) {
 // embedded at compile time, so it only ever changes across a binary
 // upgrade, never at runtime.
 func (h *Handler) serveLogo(w http.ResponseWriter, r *http.Request) {
-	data, err := staticFS.ReadFile("static/logo.png")
+	data, err := staticFS.ReadFile("static/logo.svg")
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
-	http.ServeContent(w, r, "logo.png", time.Time{}, bytes.NewReader(data))
+	http.ServeContent(w, r, "logo.svg", time.Time{}, bytes.NewReader(data))
+}
+
+// panelStaticTypes is the allowlist of panel assets serveStatic hands
+// out, with their content type; anything else under /admin/static is a
+// 404, so the route can't be used to read other embedded files.
+var panelStaticTypes = map[string]string{
+	"panel.css":     "text/css; charset=utf-8",
+	"panel.js":      "text/javascript; charset=utf-8",
+	"theme-init.js": "text/javascript; charset=utf-8",
+}
+
+// serveStatic serves the panel's stylesheet and scripts. Pages ask for
+// them with a content hash in the query ({{asset}} in templates.go), so
+// a new version always gets a new URL; the short cache is only a
+// fallback for anything that requests the bare path.
+func (h *Handler) serveStatic(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "file")
+	contentType, ok := panelStaticTypes[name]
+	if !ok {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	data, err := staticFS.ReadFile("static/" + name)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(data))
 }
 
 type formPageData struct {
@@ -145,7 +178,7 @@ func (h *Handler) setupForm(w http.ResponseWriter, r *http.Request) {
 	}
 	csrf, err := ensureCSRFCookie(w, r)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	renderTemplate(w, h.tmpl, http.StatusOK, "setup.html", formPageData{CSRFToken: csrf, InstanceName: h.instanceName(r.Context())})
@@ -173,7 +206,7 @@ func (h *Handler) setupSubmit(w http.ResponseWriter, r *http.Request) {
 
 	cfg, err := settings.Get(r.Context(), h.store.db)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
@@ -194,7 +227,7 @@ func (h *Handler) setupSubmit(w http.ResponseWriter, r *http.Request) {
 
 	hash, err := security.HashPassword(password)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
@@ -206,14 +239,14 @@ func (h *Handler) setupSubmit(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, errDuplicateEmail):
 			renderSetupError("ya existe un usuario con ese email")
 		default:
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			httperr.Internal(w, r, err)
 		}
 		return
 	}
 
 	token, err := issuePanelSession(h.jwtSecret, u.ID, true, cfg.PanelSessionTTL())
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	setSessionCookie(w, r, token, cfg.PanelSessionTTL())
@@ -223,7 +256,7 @@ func (h *Handler) setupSubmit(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) panelLoginForm(w http.ResponseWriter, r *http.Request) {
 	csrf, err := ensureCSRFCookie(w, r)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	renderTemplate(w, h.tmpl, http.StatusOK, "login.html", formPageData{CSRFToken: csrf, InstanceName: h.instanceName(r.Context())})
@@ -249,7 +282,7 @@ func (h *Handler) panelLoginSubmit(w http.ResponseWriter, r *http.Request) {
 
 	limitKey := clientIP(r) + ":" + strings.ToLower(email)
 	if !h.limiter.Allow(limitKey) {
-		renderLoginError(http.StatusTooManyRequests, "demasiados intentos, probá de nuevo más tarde")
+		renderLoginError(http.StatusTooManyRequests, "demasiados intentos, inténtalo de nuevo más tarde")
 		return
 	}
 
@@ -278,13 +311,13 @@ func (h *Handler) panelLoginSubmit(w http.ResponseWriter, r *http.Request) {
 
 	cfg, err := settings.Get(r.Context(), h.store.db)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
 	token, err := issuePanelSession(h.jwtSecret, u.ID, u.IsAdmin, cfg.PanelSessionTTL())
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	setSessionCookie(w, r, token, cfg.PanelSessionTTL())
@@ -299,17 +332,17 @@ func (h *Handler) panelLogout(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) panelUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := h.store.listUsers(r.Context())
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	csrf, err := ensureCSRFCookie(w, r)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	cfg, err := settings.Get(r.Context(), h.store.db)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	renderTemplate(w, h.tmpl, http.StatusOK, "users.html", usersPageData{
@@ -335,7 +368,7 @@ func (h *Handler) panelCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	cfg, err := settings.Get(r.Context(), h.store.db)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 
@@ -354,7 +387,7 @@ func (h *Handler) panelCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	hash, err := security.HashPassword(password)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	if _, err := h.store.createUser(r.Context(), email, hash, isAdmin); err != nil {
@@ -362,7 +395,7 @@ func (h *Handler) panelCreateUser(w http.ResponseWriter, r *http.Request) {
 			h.redirectWithModalError(w, r, "/admin/panel", "create-user-modal", email, "ya existe un usuario con ese email")
 			return
 		}
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	h.redirectWithSuccess(w, r, "/admin/panel", "Usuario creado.")
@@ -389,11 +422,11 @@ func (h *Handler) panelSetAdmin(w http.ResponseWriter, r *http.Request, isAdmin 
 	if err := h.store.updateUserAdmin(r.Context(), id, isAdmin); err != nil {
 		switch {
 		case errors.Is(err, errLastAdmin):
-			h.redirectWithError(w, r, "/admin/panel", "no podés quitarle admin al único administrador activo")
+			h.redirectWithError(w, r, "/admin/panel", "no puedes quitarle admin al único administrador activo")
 		case errors.Is(err, errNotFound):
 			h.redirectWithError(w, r, "/admin/panel", "usuario no encontrado")
 		default:
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			httperr.Internal(w, r, err)
 		}
 		return
 	}
@@ -417,11 +450,11 @@ func (h *Handler) panelDeleteUser(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.softDeleteUser(r.Context(), id); err != nil {
 		switch {
 		case errors.Is(err, errLastAdmin):
-			h.redirectWithError(w, r, "/admin/panel", "no podés dar de baja al único administrador activo")
+			h.redirectWithError(w, r, "/admin/panel", "no puedes dar de baja al único administrador activo")
 		case errors.Is(err, errNotFound):
 			h.redirectWithError(w, r, "/admin/panel", "usuario no encontrado")
 		default:
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			httperr.Internal(w, r, err)
 		}
 		return
 	}
@@ -443,7 +476,7 @@ func (h *Handler) panelRestoreUser(w http.ResponseWriter, r *http.Request) {
 			h.redirectWithError(w, r, "/admin/panel", "usuario no encontrado")
 			return
 		}
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	h.redirectWithSuccess(w, r, "/admin/panel", "Usuario restaurado.")
@@ -463,7 +496,7 @@ func (h *Handler) panelResetPassword(w http.ResponseWriter, r *http.Request) {
 
 	cfg, err := settings.Get(r.Context(), h.store.db)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	if len(password) < cfg.MinPasswordLength {
@@ -473,7 +506,7 @@ func (h *Handler) panelResetPassword(w http.ResponseWriter, r *http.Request) {
 
 	hash, err := security.HashPassword(password)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	if err := h.store.updateUserPassword(r.Context(), id, hash); err != nil {
@@ -481,7 +514,7 @@ func (h *Handler) panelResetPassword(w http.ResponseWriter, r *http.Request) {
 			h.redirectWithError(w, r, "/admin/panel", "usuario no encontrado")
 			return
 		}
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	h.redirectWithSuccess(w, r, "/admin/panel", "Contraseña reseteada.")
@@ -490,12 +523,12 @@ func (h *Handler) panelResetPassword(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) panelDevices(w http.ResponseWriter, r *http.Request) {
 	devices, err := h.store.listAllDevices(r.Context())
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	csrf, err := ensureCSRFCookie(w, r)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	renderTemplate(w, h.tmpl, http.StatusOK, "devices.html", devicesPageData{
@@ -515,21 +548,29 @@ func (h *Handler) panelRevokeDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	id := chi.URLParam(r, "id")
 	if err := h.store.deleteDevice(r.Context(), id); err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	h.redirectWithSuccess(w, r, "/admin/panel/devices", "Dispositivo revocado.")
 }
 
 func (h *Handler) panelSettings(w http.ResponseWriter, r *http.Request) {
+	h.renderSettings(w, r, "")
+}
+
+// renderSettings draws the settings page. generatedSecret is only set
+// by panelGenerateSecret, which renders the page as the POST response
+// itself: the suggested secret never travels in a URL, so it doesn't
+// end up in browser history, Referer headers or access logs.
+func (h *Handler) renderSettings(w http.ResponseWriter, r *http.Request, generatedSecret string) {
 	cfg, err := settings.Get(r.Context(), h.store.db)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	csrf, err := ensureCSRFCookie(w, r)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	renderTemplate(w, h.tmpl, http.StatusOK, "settings.html", settingsPageData{
@@ -538,7 +579,7 @@ func (h *Handler) panelSettings(w http.ResponseWriter, r *http.Request) {
 		Settings:        *cfg,
 		Error:           r.URL.Query().Get("error"),
 		Success:         r.URL.Query().Get("success"),
-		GeneratedSecret: r.URL.Query().Get("generated_secret"),
+		GeneratedSecret: generatedSecret,
 		InstanceName:    cfg.InstanceName,
 	})
 }
@@ -567,6 +608,25 @@ func (h *Handler) panelUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	refreshTTL, refreshTTLErr := strconv.Atoi(r.FormValue("refresh_token_ttl_days"))
 	panelTTL, panelTTLErr := strconv.Atoi(r.FormValue("panel_session_ttl_hours"))
 	maxDevices, maxDevicesErr := strconv.Atoi(r.FormValue("max_devices_per_user"))
+	// Los navegadores mandan los saltos de línea de un <textarea> como
+	// \r\n (lo exige la spec de HTML al enviar un formulario), y el
+	// texto guardado usa \n: sin normalizar, cualquier guardado del panel
+	// parecía un cambio de la política y exigía subir su versión.
+	policyText := strings.TrimSpace(strings.ReplaceAll(r.FormValue("privacy_policy_text"), "\r\n", "\n"))
+	policyVersion, policyVersionErr := strconv.Atoi(r.FormValue("privacy_policy_version"))
+
+	// Un cambio de texto sin subir la versión dejaría a cualquier
+	// usuario cuyo privacy_accepted_version ya coincida con la
+	// guardada sin volver a ver el gate de consentimiento — el texto
+	// nuevo se aplicaría en silencio. current puede ser nil solo si
+	// instance_settings no tiene fila (no debería pasar, hay un
+	// default en la migración), en cuyo caso se salta el chequeo en
+	// vez de bloquear el guardado por un error no relacionado.
+	current, currentErr := settings.Get(r.Context(), h.store.db)
+	if currentErr == nil && current != nil && policyText != current.PrivacyPolicyText && policyVersionErr == nil && policyVersion <= current.PrivacyPolicyVersion {
+		h.redirectWithError(w, r, "/admin/panel/settings", "cambiaste el texto de la política — sube la versión para que los usuarios que ya aceptaron la vean de nuevo")
+		return
+	}
 
 	switch {
 	case name == "" || len(name) > 60:
@@ -596,6 +656,12 @@ func (h *Handler) panelUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	case maxDevicesErr != nil || maxDevices < 0 || maxDevices > 1000:
 		h.redirectWithError(w, r, "/admin/panel/settings", "el máximo de dispositivos por usuario debe ser un número entre 0 (sin límite) y 1000")
 		return
+	case policyText == "" || len(policyText) > 20000:
+		h.redirectWithError(w, r, "/admin/panel/settings", "el texto de la política debe tener entre 1 y 20000 caracteres")
+		return
+	case policyVersionErr != nil || policyVersion < 1 || policyVersion > 1000000:
+		h.redirectWithError(w, r, "/admin/panel/settings", "la versión de la política debe ser un número entre 1 y 1000000")
+		return
 	}
 
 	err := settings.Update(r.Context(), h.store.db, settings.Settings{
@@ -609,9 +675,11 @@ func (h *Handler) panelUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		RefreshTokenTTLDays:         refreshTTL,
 		PanelSessionTTLHours:        panelTTL,
 		MaxDevicesPerUser:           maxDevices,
+		PrivacyPolicyText:           policyText,
+		PrivacyPolicyVersion:        policyVersion,
 	})
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
 	h.redirectWithSuccess(w, r, "/admin/panel/settings", "Configuración guardada.")
@@ -652,8 +720,9 @@ func (h *Handler) panelGenerateSecret(w http.ResponseWriter, r *http.Request) {
 
 	raw, _, err := security.GenerateOpaqueToken()
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httperr.Internal(w, r, err)
 		return
 	}
-	http.Redirect(w, r, "/admin/panel/settings?generated_secret="+url.QueryEscape(raw), http.StatusFound)
+	w.Header().Set("Cache-Control", "no-store")
+	h.renderSettings(w, r, raw)
 }

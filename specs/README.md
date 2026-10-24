@@ -38,9 +38,14 @@ tres archivos:
 | Feature | Estado | Carpeta |
 |---|---|---|
 | Arquitectura inicial | en diseño | [`arquitectura-inicial/`](./arquitectura-inicial/requirements.md) |
-| Sync incremental | en progreso | [`sync-incremental/`](./sync-incremental/requirements.md) |
+| Sync incremental | implementado | [`sync-incremental/`](./sync-incremental/requirements.md) |
 | Auth multi-usuario | implementado (v1) | [`auth-multiusuario/`](./auth-multiusuario/requirements.md) |
+| Sesión por cookie HttpOnly | implementado | [`sesion-cookie/`](./sesion-cookie/requirements.md) |
 | Esquema de datos | implementado | [`esquema-datos/`](./esquema-datos/requirements.md) |
-| Convenciones de código | en diseño | [`convenciones-codigo/`](./convenciones-codigo/requirements.md) |
+| Convenciones de código | implementado | [`convenciones-codigo/`](./convenciones-codigo/requirements.md) |
 | Panel de administración web | implementado | [`panel-admin/`](./panel-admin/requirements.md) |
 | LWW por campo | implementado (sin mergear) | [`lww-por-campo/`](./lww-por-campo/requirements.md) |
+| Web app embebida | implementado (sin mergear) | [`webapp-embebida/`](./webapp-embebida/requirements.md) |
+| Papelera compartida entre servicios | implementado | [`papelera-compartida/`](./papelera-compartida/requirements.md) |
+| CORS configurable | implementado | [`cors-configurable/`](./cors-configurable/requirements.md) |
+| Cabeceras de seguridad (CSP) | implementado | [`cabeceras-seguridad/`](./cabeceras-seguridad/requirements.md) |

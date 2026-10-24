@@ -1,5 +1,7 @@
 # Logday Server
 
+![local-first](./.github/badge-local-first.svg)
+
 API de sync self-hosted para [Logday](https://github.com/jorgebuitragor/logday),
 al estilo Vaultwarden/Bitwarden: se despliega con un único contenedor
 Docker, y cada cliente (desktop, web, móvil, extensión) se configura para
@@ -27,16 +29,22 @@ spec-driven development y el detalle de diseño de cada feature.
 
 ## Levantar el servidor
 
-Requiere Docker y Docker Compose.
+Requiere Docker y Docker Compose. El build también compila
+[`logday-web`](https://github.com/jorgebuitragor/logday-web) (repo
+privado, aparte) y lo embebe sirviéndolo en `/app` — como es privado,
+el build lo toma de un checkout local en vez de clonarlo, así que
+necesitás tenerlo clonado como hermano de este repo
+(`../logday-web` relativo a acá).
 
 ```bash
+git clone https://github.com/jorgebuitragor/logday-web.git ../logday-web
 cp .env.example .env
 # editá .env — ver "Variables de entorno" abajo
 docker compose --env-file .env up -d --build
 ```
 
 Confirmá que arrancó: `curl http://localhost:8080/health` debería
-responder `ok`.
+responder `ok`. El cliente web queda en `http://localhost:8080/app`.
 
 ### Variables de entorno
 
@@ -90,6 +98,20 @@ Ver [`specs/panel-admin/`](./specs/panel-admin/requirements.md) para el
 detalle de diseño (por qué la sesión del panel es una cookie propia y no
 reusa el modelo de tokens de los clientes de sync, CSRF, etc.).
 
+**Recomendación para producción**: el panel (`/admin/panel/*`) es la
+única parte del servidor pensada para uso humano por navegador — a
+diferencia de la API de sync (`/auth`, `/tasks`, `/sync/changes`, `/ws`,
+etc.), que consumen los clientes de Logday (desktop, web, móvil) y no
+puede quedar detrás de un login interactivo. Si tu proxy o CDN soporta
+reglas de acceso por path (por ejemplo Cloudflare Access, un
+`forward_auth` de Traefik, o `auth_request` de nginx con un proveedor
+SSO), agregá esa capa **solo sobre `/admin/panel/*`** como segundo
+factor delante del login propio del panel, y dejá el resto del dominio
+sin esa capa para no romper a los clientes de sync. Es el mismo patrón
+de "seguridad en profundidad" recomendado para cualquier dashboard
+administrativo self-hosted (Coolify, Vaultwarden, etc.): auth de la
+app + auth del borde, en dos capas independientes.
+
 ## Reverse proxy y TLS
 
 El servidor sirve HTTP plano a propósito — no maneja certificados ni
@@ -135,3 +157,10 @@ make fmt     # golangci-lint fmt ./...
 Ver [`specs/convenciones-codigo/`](./specs/convenciones-codigo/requirements.md)
 para la estructura de paquetes y convenciones de código, y
 [`CONTRIBUTING.md`](./CONTRIBUTING.md) para el flujo de ramas (Gitflow).
+
+## Licencia
+
+[AGPL-3.0-or-later](./LICENSE). Software libre: cualquier persona u
+organización puede desplegar su propia instancia. Si ofreces una
+versión modificada como servicio a terceros, el AGPL exige publicar
+también ese código modificado (copyleft de red).

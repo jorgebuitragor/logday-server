@@ -32,6 +32,41 @@ CRDT real (`Deln0r/ygo`) — ver `arquitectura-inicial/design.md`.
 - Campos excluidos del sync por ser rutas de filesystem local:
   `Task.filePath`, `Task.linked_paths`, `Note.filePath`.
 
+## Conexión y escrituras concurrentes
+
+`internal/db/db.go` abre SQLite con
+`_journal_mode=WAL&_foreign_keys=on&_busy_timeout=5000&_txlock=immediate`.
+
+Cada transacción de los stores de dominio lee y después escribe. Por
+ejemplo, `upsertNote` revisa dueño y `updated_at` antes de hacer el
+upsert, y `applyContentUpdate` lee `content_crdt`, mezcla y guarda. Hasta
+el 19 oct 2026 esas transacciones eran `DEFERRED`: empezaban como
+lectoras y, si otra escritura confirmaba entre la lectura y la escritura,
+SQLite no las dejaba pasar a escritoras y fallaban al instante con
+`SQLITE_BUSY` ("database is locked"). El handler respondía 500. Se vio
+en el e2e de Logday Web: un `POST /notes` en paralelo con un
+`POST /notes/{id}/content` devolvía 500 en una de cada 4 a 8 corridas.
+Le pasa a cualquier usuario con dos clientes escribiendo a la vez.
+
+- `_busy_timeout` solo **no alcanza**. SQLite no consulta el busy
+  handler para pasar una transacción de lectora a escritora. Medido con
+  `TestConcurrentReadThenWriteTransactions` (8 goroutines × 25
+  transacciones): sin nada fallan 152 de 200; solo con `_busy_timeout`,
+  153 de 200.
+- `_txlock=immediate` hace que `BeginTx` tome el lock de escritura desde
+  el principio (`BEGIN IMMEDIATE`), y `_busy_timeout` hace que una
+  segunda escritora espere hasta 5 s en vez de fallar. Con los dos:
+  0 de 200, también con `-race`.
+- El costo: las escrituras de todos los usuarios quedan en serie. Para
+  una instancia personal o de equipo chico es aceptable. Las lecturas
+  fuera de transacción (`db.Query*`: listados, `/sync/changes`) no se
+  afectan, porque en WAL siguen siendo concurrentes. Todas las
+  `BeginTx` del repo escriben, así que ninguna lectura queda en serie
+  por esto.
+- Postgres, si algún día reemplaza a SQLite, no necesita nada de esto.
+  Ahí el equivalente es un `SELECT ... FOR UPDATE` o reintentar por
+  conflicto de serialización.
+
 ## Tablas
 
 ### `tasks`

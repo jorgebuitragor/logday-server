@@ -1,8 +1,8 @@
 # Sync incremental — Tareas
 
-Estado: en progreso (`GET /sync/changes`, WS en tiempo real y purga de
-tombstones con `410` implementados para las 7 entidades de negocio;
-CRDT y paginación siguen pendientes)
+Estado: implementado (`GET /sync/changes` con paginación, WS en tiempo
+real y purga de tombstones con `410` implementados para las 7
+entidades de negocio)
 
 - [x] Definir formato de cursor (secuencia monótona por usuario).
 - [x] Definir forma del endpoint de cambios (unificado, no por tipo).
@@ -44,5 +44,19 @@ CRDT y paginación siguen pendientes)
       `{type:"task", id:"...", seq:1}` por el socket. Tests unitarios
       cubren entrega de notificación, rechazo por falta de auth, y
       rechazo por token inválido.
-- [ ] Definir paginación del endpoint de cambios.
-- [ ] Definir forma exacta de los updates CRDT dentro del payload.
+- [x] Forma exacta de los updates CRDT dentro del payload: ya
+      implementado (`scanNote`/su equivalente en `dailyentry`
+      decodifican `content_crdt` a `content`/`content_state` en cada
+      lectura, incluida `ChangesSince`) — solo faltaba documentarlo,
+      ver `design.md`. Validado por ambos clientes reales
+      (`task-manager`, `logday-web`) hidratando `content_state` con
+      `Y.applyUpdate`.
+- [x] Paginación del endpoint de cambios: `limit` opcional en
+      `internal/sync/handlers.go` (parseo igual que `since`, `400` si
+      no es un entero válido o es negativo), truncado del slice ya
+      mergeado/ordenado en `changesSince` (`internal/sync/store.go`)
+      — sin `LIMIT` por tabla, ver limitación aceptada en `design.md`.
+      `openapi.yaml` actualizado. Tests: página menor al total, límite
+      mayor al total, `limit=0` sin efecto, y un recorrido completo de
+      varias páginas sin huecos ni duplicados
+      (`internal/sync/store_test.go`).

@@ -78,5 +78,5 @@ func authenticate(ctx context.Context, authHandler *auth.Handler, conn *websocke
 		return "", errors.New("expected an auth message with a token")
 	}
 
-	return authHandler.VerifyAccessToken(msg.Token)
+	return authHandler.VerifyAccessToken(ctx, msg.Token)
 }
