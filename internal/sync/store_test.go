@@ -44,6 +44,14 @@ func insertTaskFixture(t *testing.T, database *sql.DB, id, userID string, seq in
 	if err != nil {
 		t.Fatalf("inserting task fixture: %v", err)
 	}
+	// Keep the user's counter at least at seq, as db.NextSeq would.
+	if _, err := database.Exec(
+		`INSERT INTO user_sync_counters (user_id, next_seq) VALUES (?, ?)
+		 ON CONFLICT(user_id) DO UPDATE SET next_seq = MAX(next_seq, excluded.next_seq)`,
+		userID, seq,
+	); err != nil {
+		t.Fatalf("bumping user_sync_counters fixture: %v", err)
+	}
 }
 
 func TestChangesSinceReturnsInSeqOrder(t *testing.T) {
@@ -288,5 +296,30 @@ func TestChangesSincePagingWalksForwardWithoutGapsOrDuplicates(t *testing.T) {
 		if id != want {
 			t.Fatalf("got[%d] = %q, want %q (order/dedup broke across pages): %v", i, id, want, got)
 		}
+	}
+}
+
+// A cursor ahead of the last seq the server allocated can't be ours:
+// the client used another server or account, or the database was
+// restored from a backup. Treating it as "no changes" would hide every
+// change up to that seq forever, so it must be rejected like a purged
+// cursor, which makes the client do a full resync.
+func TestChangesSinceRejectsCursorAheadOfServer(t *testing.T) {
+	s, database := newTestStore(t)
+	ctx := context.Background()
+
+	insertTaskFixture(t, database, "t1", "user-1", 1, false)
+
+	if _, err := s.changesSince(ctx, "user-1", 192, 0); !errors.Is(err, errCursorInvalid) {
+		t.Fatalf("expected errCursorInvalid for since=192 with latest seq 1, got %v", err)
+	}
+	if _, err := s.changesSince(ctx, "user-2", 5, 0); !errors.Is(err, errCursorInvalid) {
+		t.Fatalf("expected errCursorInvalid for a user with no changes at all, got %v", err)
+	}
+	if changes, err := s.changesSince(ctx, "user-1", 1, 0); err != nil || len(changes) != 0 {
+		t.Fatalf("since equal to the latest seq is a valid, up-to-date cursor: got %v, %v", changes, err)
+	}
+	if changes, err := s.changesSince(ctx, "user-1", 0, 0); err != nil || len(changes) != 1 {
+		t.Fatalf("a full resync must still work: got %v, %v", changes, err)
 	}
 }
