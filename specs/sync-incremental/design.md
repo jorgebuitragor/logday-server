@@ -144,6 +144,14 @@ Implementado — ver `internal/db/purge.go`.
   Este chequeo solo aplica cuando `since > 0` — un full resync
   (`since` ausente o `0`) siempre puede responderse completo con el
   estado actual, sin importar qué se haya purgado.
+- También responde `410` si `X` es mayor que el último `seq` que el
+  servidor asignó al usuario (`user_sync_counters.next_seq`, que nunca
+  baja). Ese cursor no puede ser de este servidor: el cliente estuvo
+  conectado a otro servidor u otra cuenta (los tres clientes conservan
+  el cursor al reconectar), o la base se restauró de un respaldo más
+  viejo. Con `200` vacío, el cliente nunca recibiría los cambios hasta
+  ese `seq`. Encontrado el 23 oct 2026 probando Mobile contra un
+  servidor nuevo con un cursor de 192 y un servidor en seq 1.
 - Full resync = mismo endpoint sin `since` (o `since=0`): trae todo el
   estado actual no borrado.
 
