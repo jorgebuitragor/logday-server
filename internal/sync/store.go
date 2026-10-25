@@ -38,6 +38,13 @@ func NewStore(db *sql.DB) *store {
 // watermark for userID — callers must not treat that as "no changes",
 // since some tombstones in that range are gone and can't be reported.
 //
+// It also returns errCursorInvalid if since is ahead of the last seq
+// this server ever allocated to userID. That cursor can't have come from
+// here: the client was connected to another server or account (clients
+// keep their cursor across reconnects), or this database was restored
+// from an older backup. Answering "no changes" would hide every change
+// up to that seq from the client forever; the 410 makes it resync.
+//
 // limit (0 = unbounded) truncates the merged, seq-sorted result — it
 // does not push a LIMIT into each domain's own query, so this doesn't
 // reduce the cost of fetching from the 7 tables, only the size of the
@@ -52,6 +59,13 @@ func (s *store) changesSince(ctx context.Context, userID string, since, limit in
 			return nil, fmt.Errorf("checking purge watermark: %w", err)
 		}
 		if since < purgedBefore {
+			return nil, errCursorInvalid
+		}
+		latest, err := db.LatestSeq(ctx, s.db, userID)
+		if err != nil {
+			return nil, err
+		}
+		if since > latest {
 			return nil, errCursorInvalid
 		}
 	}
