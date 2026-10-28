@@ -244,3 +244,80 @@ func TestListNotesIsScopedToUser(t *testing.T) {
 		t.Fatalf("expected only user-1's note, got %+v", notes)
 	}
 }
+
+// Los campos de fecha son texto opaco (decisión del 28 oct 2026, ver
+// specs/esquema-datos/requirements.md, "Formato de fechas e
+// instantes"): el server guarda y devuelve el string tal cual, sea un
+// instante de toISOString() o un YYYY-MM-DD legado. Si algún día se
+// normalizan o validan, los clientes con datos legados se rompen.
+var dateStampCases = []struct {
+	name  string
+	value string
+}{
+	{"instante", "2026-10-28T19:30:00.000Z"},
+	{"fecha legada", "2026-10-28"},
+}
+
+func TestUpsertNoteKeepsDateStampsVerbatim(t *testing.T) {
+	for _, tc := range dateStampCases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestStore(t)
+			ctx := context.Background()
+
+			in := sampleNote("user-1", time.Now())
+			in.Created = tc.value
+			in.Updated = tc.value
+			if _, err := s.upsertNote(ctx, in); err != nil {
+				t.Fatalf("upsertNote: %v", err)
+			}
+
+			notes, err := s.listNotes(ctx, "user-1")
+			if err != nil {
+				t.Fatalf("listNotes: %v", err)
+			}
+			if len(notes) != 1 {
+				t.Fatalf("expected 1 note, got %d", len(notes))
+			}
+			if notes[0].Created != tc.value || notes[0].Updated != tc.value {
+				t.Fatalf("expected created/updated %q, got %q/%q", tc.value, notes[0].Created, notes[0].Updated)
+			}
+		})
+	}
+}
+
+func TestPatchNoteKeepsDateStampsVerbatim(t *testing.T) {
+	for _, tc := range dateStampCases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestStore(t)
+			ctx := context.Background()
+
+			base := time.Now()
+			if _, err := s.upsertNote(ctx, sampleNote("user-1", base)); err != nil {
+				t.Fatalf("initial upsertNote: %v", err)
+			}
+
+			patch := Patch{
+				Created: db.Field[string]{Set: true, Value: tc.value},
+				Updated: db.Field[string]{Set: true, Value: tc.value},
+			}
+			stored, changed, err := s.patchNote(ctx, "note-1", "user-1", patch, base.Add(time.Minute))
+			if err != nil {
+				t.Fatalf("patchNote: %v", err)
+			}
+			if !changed {
+				t.Fatalf("expected the patch to apply")
+			}
+			if stored.Created != tc.value || stored.Updated != tc.value {
+				t.Fatalf("respuesta del PATCH: expected created/updated %q, got %q/%q", tc.value, stored.Created, stored.Updated)
+			}
+
+			notes, err := s.listNotes(ctx, "user-1")
+			if err != nil {
+				t.Fatalf("listNotes: %v", err)
+			}
+			if len(notes) != 1 || notes[0].Created != tc.value || notes[0].Updated != tc.value {
+				t.Fatalf("expected stored created/updated %q, got %+v", tc.value, notes)
+			}
+		})
+	}
+}
