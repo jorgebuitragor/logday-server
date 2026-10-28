@@ -1484,13 +1484,34 @@ components:
           type: string
         created:
           type: string
-          description: Timestamp de creación definido por el cliente (string libre, no necesariamente ISO 8601).
+          description: |
+            Momento de creación de la tarea. Se escribe como instante UTC con
+            el formato de `toISOString()` (`2026-10-28T19:30:00.000Z`). Los
+            valores `YYYY-MM-DD` legados siguen siendo válidos y se leen como
+            esa fecha de calendario en la zona local del lector. Obligatorio y
+            no vacío, pero el servidor no valida su formato: guarda y devuelve
+            el string tal cual.
+          example: "2026-10-28T19:30:00.000Z"
         completed_at:
           type: string
           nullable: true
+          description: |
+            Momento en que la tarea se completó; solo cuenta si `status` es
+            `done`. Se escribe como instante UTC con el formato de
+            `toISOString()`. Los valores `YYYY-MM-DD` legados siguen siendo
+            válidos y se leen como fecha local del lector. El servidor guarda
+            y devuelve el string sin validarlo. Si es `null`, la respuesta
+            omite la clave.
+          example: "2026-10-28T21:05:12.345Z"
         due:
           type: string
+          format: date
           nullable: true
+          description: |
+            Fecha de calendario `YYYY-MM-DD` local, sin hora ni zona. No es un
+            instante. El servidor no valida su formato. Si es `null`, la
+            respuesta omite la clave.
+          example: "2026-10-31"
         content:
           type: string
         updated_at:
@@ -1534,12 +1555,27 @@ components:
           type: string
         created:
           type: string
+          description: |
+            Instante UTC con el formato de `toISOString()`. Los `YYYY-MM-DD`
+            legados siguen siendo válidos y se leen como fecha local del
+            lector. No puede ser vacío; el servidor no valida su formato y
+            guarda el string tal cual. Ver `TaskWrite.created`.
+          example: "2026-10-28T19:30:00.000Z"
         completed_at:
           type: string
           nullable: true
+          description: |
+            Instante UTC con el formato de `toISOString()` (los `YYYY-MM-DD`
+            legados siguen siendo válidos). `null` lo limpia, y entonces la
+            respuesta omite la clave. El servidor guarda el string sin
+            validarlo. Ver `TaskWrite.completed_at`.
+          example: "2026-10-28T21:05:12.345Z"
         due:
           type: string
+          format: date
           nullable: true
+          description: Fecha de calendario `YYYY-MM-DD` local, sin hora ni zona. `null` la limpia.
+          example: "2026-10-31"
         content:
           type: string
         updated_at:
@@ -1564,8 +1600,24 @@ components:
             type: string
         created:
           type: string
+          description: |
+            Momento de creación de la nota. Se escribe como instante UTC con
+            el formato de `toISOString()` (`2026-10-28T19:30:00.000Z`). Los
+            valores `YYYY-MM-DD` legados siguen siendo válidos y se leen como
+            esa fecha de calendario en la zona local del lector. Obligatorio y
+            no vacío, pero el servidor no valida su formato: guarda y devuelve
+            el string tal cual.
+          example: "2026-10-28T19:30:00.000Z"
         updated:
           type: string
+          description: |
+            Momento de la última edición que ve el usuario (distinto de
+            `updated_at`, que es el reloj de sync). Se escribe como instante
+            UTC con el formato de `toISOString()`. Los `YYYY-MM-DD` legados
+            siguen siendo válidos y se leen como fecha local del lector. El
+            servidor guarda y devuelve el string sin validarlo. En notas
+            antiguas puede venir vacío (`""`).
+          example: "2026-10-28T20:14:03.120Z"
         pinned:
           type: boolean
         updated_at:
@@ -1604,8 +1656,19 @@ components:
             type: string
         created:
           type: string
+          description: |
+            Instante UTC con el formato de `toISOString()`. Los `YYYY-MM-DD`
+            legados siguen siendo válidos y se leen como fecha local del
+            lector. No puede ser vacío; el servidor no valida su formato y
+            guarda el string tal cual. Ver `NoteWrite.created`.
+          example: "2026-10-28T19:30:00.000Z"
         updated:
           type: string
+          description: |
+            Instante UTC con el formato de `toISOString()` (los `YYYY-MM-DD`
+            legados siguen siendo válidos). El servidor guarda el string sin
+            validarlo. Ver `NoteWrite.updated`.
+          example: "2026-10-28T20:14:03.120Z"
         pinned:
           type: boolean
         updated_at:

@@ -80,9 +80,9 @@ Le pasa a cualquier usuario con dos clientes escribiendo a la vez.
 | status | TEXT CHECK IN ('todo','in-progress','done') | |
 | tags | TEXT (JSON array) | |
 | project | TEXT | string plano, ver `requirements.md` |
-| created | DATE | |
-| completed_at | DATE NULL | |
-| due | DATE NULL | |
+| created | TEXT | instante UTC (`toISOString()`) o `YYYY-MM-DD` legado; texto opaco, sin validar (ver `requirements.md`, "Formato de fechas e instantes") |
+| completed_at | TEXT NULL | igual que `created`; solo cuenta si `status = 'done'`; NULL omite la clave en el JSON |
+| due | TEXT NULL | fecha de calendario `YYYY-MM-DD` local, sin hora ni zona; sin validar |
 | content | TEXT | markdown, LWW por fila completa (ver limitación v1) |
 | seq | INTEGER | |
 | updated_at | TIMESTAMPTZ | |
@@ -112,8 +112,8 @@ crudo en base64), nunca se serializan directamente.
 | title | TEXT | |
 | folder | TEXT | string plano |
 | tags | TEXT (JSON array) | |
-| created | DATE | |
-| updated | DATE | fecha de negocio (la que ve el usuario), distinta de `updated_at` |
+| created | TEXT | instante UTC (`toISOString()`) o `YYYY-MM-DD` legado; texto opaco, sin validar (ver `requirements.md`, "Formato de fechas e instantes") |
+| updated | TEXT | última edición que ve el usuario, distinta de `updated_at`; mismo formato que `created`; puede venir vacío en notas antiguas |
 | pinned | BOOLEAN | |
 | content_crdt | BLOB NULL | estado CRDT compactado (`Deln0r/ygo`), NULL = sin contenido todavía |
 | seq | INTEGER | |

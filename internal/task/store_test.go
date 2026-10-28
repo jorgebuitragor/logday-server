@@ -362,3 +362,97 @@ func TestListTasksIsScopedToUser(t *testing.T) {
 		t.Fatalf("expected only user-1's task, got %+v", tasks)
 	}
 }
+
+// Los campos de fecha son texto opaco (decisión del 28 oct 2026, ver
+// specs/esquema-datos/requirements.md, "Formato de fechas e
+// instantes"): el server guarda y devuelve el string tal cual, sea un
+// instante de toISOString() o un YYYY-MM-DD legado. Si algún día se
+// normalizan o validan, los clientes con datos legados se rompen.
+var dateStampCases = []struct {
+	name  string
+	value string
+}{
+	{"instante", "2026-10-28T19:30:00.000Z"},
+	{"fecha legada", "2026-10-28"},
+}
+
+func TestUpsertTaskKeepsDateStampsVerbatim(t *testing.T) {
+	for _, tc := range dateStampCases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestStore(t)
+			ctx := context.Background()
+
+			in := sampleTask("user-1", time.Now())
+			in.Status = "done"
+			in.Created = tc.value
+			completed := tc.value
+			in.CompletedAt = &completed
+			due := "2026-10-31"
+			in.Due = &due
+			if _, err := s.upsertTask(ctx, in); err != nil {
+				t.Fatalf("upsertTask: %v", err)
+			}
+
+			tasks, err := s.listTasks(ctx, "user-1")
+			if err != nil {
+				t.Fatalf("listTasks: %v", err)
+			}
+			if len(tasks) != 1 {
+				t.Fatalf("expected 1 task, got %d", len(tasks))
+			}
+			got := tasks[0]
+			if got.Created != tc.value {
+				t.Fatalf("created: expected %q, got %q", tc.value, got.Created)
+			}
+			if got.CompletedAt == nil || *got.CompletedAt != tc.value {
+				t.Fatalf("completed_at: expected %q, got %v", tc.value, got.CompletedAt)
+			}
+			if got.Due == nil || *got.Due != due {
+				t.Fatalf("due: expected %q, got %v", due, got.Due)
+			}
+		})
+	}
+}
+
+func TestPatchTaskKeepsDateStampsVerbatim(t *testing.T) {
+	for _, tc := range dateStampCases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestStore(t)
+			ctx := context.Background()
+
+			base := time.Now()
+			if _, err := s.upsertTask(ctx, sampleTask("user-1", base)); err != nil {
+				t.Fatalf("initial upsertTask: %v", err)
+			}
+
+			completed := tc.value
+			patch := Patch{
+				Status:      db.Field[string]{Set: true, Value: "done"},
+				Created:     db.Field[string]{Set: true, Value: tc.value},
+				CompletedAt: db.Field[*string]{Set: true, Value: &completed},
+			}
+			stored, changed, err := s.patchTask(ctx, "task-1", "user-1", patch, base.Add(time.Minute))
+			if err != nil {
+				t.Fatalf("patchTask: %v", err)
+			}
+			if !changed {
+				t.Fatalf("expected the patch to apply")
+			}
+			if stored.Created != tc.value {
+				t.Fatalf("created (respuesta del PATCH): expected %q, got %q", tc.value, stored.Created)
+			}
+			if stored.CompletedAt == nil || *stored.CompletedAt != tc.value {
+				t.Fatalf("completed_at (respuesta del PATCH): expected %q, got %v", tc.value, stored.CompletedAt)
+			}
+
+			tasks, err := s.listTasks(ctx, "user-1")
+			if err != nil {
+				t.Fatalf("listTasks: %v", err)
+			}
+			if len(tasks) != 1 || tasks[0].Created != tc.value ||
+				tasks[0].CompletedAt == nil || *tasks[0].CompletedAt != tc.value {
+				t.Fatalf("expected stored stamps %q, got %+v", tc.value, tasks)
+			}
+		})
+	}
+}
