@@ -6,10 +6,13 @@ Estado: en diseño.
 
 Hoy cada cliente arma el mensaje del daily ("Buenos días. El día…") y
 el usuario lo copia y lo pega a mano en el chat de su equipo. Este spec
-cubre enviarlo directamente a ese chat, que es la primera de las
-**integraciones opcionales** de Logday: funciones incluidas en el
-producto, apagadas por defecto, que cada usuario activa si su empresa
-las usa (ver la nota "Integraciones opcionales" del vault).
+cubre enviarlo directamente a ese chat. Es la primera **extensión** de
+Logday: "Chat del equipo" (`team-chat`), del grupo Integraciones. Las
+extensiones son funciones incluidas en el producto, apagadas por
+defecto, que cada usuario activa si las usa. La base común (catálogo en
+Opciones → Extensiones, activación, aviso de consentimiento, secretos en
+el almacén seguro) está en `task-manager/specs/extensiones/`, y este
+spec solo agrega lo propio del chat.
 
 Proveedores soportados, todos por **webhook entrante**: Google Chat,
 Slack y Microsoft Teams (flujo de Workflows). Un webhook entrante es una
@@ -120,7 +123,7 @@ Fuera de alcance:
   el usuario confirme que la URL funciona.
 - R21. Tras cada envío, DEBERÁN guardarse la hora, la fecha del daily
   enviado y el resultado (ok o el error), y DEBERÁN mostrarse en la
-  pantalla de Integraciones.
+  tarjeta de la extensión.
 
 ### Envío programado
 
@@ -154,9 +157,9 @@ Fuera de alcance:
 
 ### Clientes
 
-- R30. Desktop y Mobile DEBERÁN mostrar siempre la sección
-  "Integraciones" en Opciones. Web, solo si `GET /integrations` responde
-  `available: true`.
+- R30. Desktop y Mobile DEBERÁN ofrecer "Chat del equipo" en su
+  catálogo de Opciones → Extensiones. Web, solo si `GET /integrations`
+  responde `available: true`.
 - R31. Los clientes DEBERÁN mostrar el botón "Enviar al chat" junto a
   Copiar solo si hay una integración activa en algún modo.
 - R32. Ningún cliente DEBERÁ guardar en sus archivos de datos ni en el

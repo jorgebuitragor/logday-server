@@ -4,7 +4,7 @@ Estado: en diseño.
 
 ## Decisiones
 
-- [x] Integración incluida y apagada por defecto, no plugin de terceros.
+- [x] Es la extensión `team-chat` (grupo Integraciones), incluida y apagada por defecto, no plugin de terceros.
 - [x] No depende del sync: modo local en Desktop y Mobile, y modo
   cuenta en el servidor (el único de Web).
 - [x] El envío manual usa el texto del cliente; el programado lo arma
@@ -19,16 +19,16 @@ Estado: en diseño.
 
 ## Fase 1 — Desktop en modo local (no necesita servidor)
 
-Va en `task-manager`, con su propio spec, que referencia este.
+Va en `task-manager`, sobre la base de `specs/extensiones/`, que se
+hace antes o en el mismo PR.
 
-- [ ] Rust: crate `keyring` y comandos `set_chat_webhook`,
-  `clear_chat_webhook`, `chat_webhook_hint` y `send_chat_webhook`, con
-  validación de host, `reqwest` sin redirecciones y timeout de 10 s
-  (R10, R11, R18, R19).
+- [ ] Rust: comando `team_chat_send`, con validación de host, `reqwest`
+  sin redirecciones y timeout de 10 s (R10, R11, R18, R19). La URL se
+  guarda con los comandos de secretos de la base.
 - [ ] Pruebas en Rust de la validación con la tabla de casos del design.
 - [ ] Preferencias locales: proveedor, pista, consentimiento y último
   resultado (R12, R21).
-- [ ] Opciones → Integraciones y el botón "Enviar al chat" en
+- [ ] La tarjeta en Opciones → Extensiones y el botón "Enviar al chat" en
   `DailyEditor` (R15–R17, R20, R30–R32).
 
 ## Fase 2 — Servidor (modo cuenta) y Web
@@ -60,7 +60,7 @@ Va en `task-manager`, con su propio spec, que referencia este.
   - redirección no seguida (R19);
   - que la respuesta nunca incluye la URL.
 - [ ] `openapi.yaml`.
-- [ ] Web: Opciones → Integraciones y el botón, solo en modo cuenta (R5,
+- [ ] Web: la extensión en Opciones → Extensiones y el botón, solo en modo cuenta (R5,
   R30, R31).
 - [ ] Desktop: elegir el modo, enviar por la cuenta y pasar de local a
   cuenta (R2–R4).
@@ -88,7 +88,7 @@ Va en `task-manager`, con su propio spec, que referencia este.
   - festivo;
   - ausencia;
   - daily vacío.
-- [ ] Clientes: el control de la hora programada en Integraciones.
+- [ ] Clientes: el control de la hora programada en la tarjeta de la extensión.
 
 ## Fuera de alcance (specs aparte)
 

@@ -199,19 +199,18 @@ código.
 Cada cliente lo detalla en su spec. Lo común:
 
 - **Configuración no secreta** (proveedor, pista, consentimiento,
-  programación, último resultado) en las preferencias locales, que no
-  se sincronizan. Es el mismo criterio de "Preferencias de UI siempre
-  locales".
+  programación, último resultado) en las preferencias locales de la
+  extensión (`AppConfig.extensions['team-chat']` en Desktop), que no se
+  sincronizan.
 - **La URL, en el almacén seguro:**
-  - Desktop, con el crate `keyring` (Llavero de macOS, Administrador de
-    credenciales de Windows, Secret Service en Linux), bajo el servicio
-    `com.jorgebuitrago.logday` y la cuenta `chat-webhook`.
+  - Desktop, con los comandos de secretos de la base de extensiones
+    (`ext_secret_set('team-chat', 'webhook', …)`), que usan el llavero
+    del SO.
   - Mobile, con `expo-secure-store`.
-- **Desktop envía desde Rust.** Un comando `send_chat_webhook(provider,
-  text)` lee la URL del llavero, valida el host y envía con `reqwest`
-  (timeout de 10 s, `redirect::Policy::none()`). La URL nunca cruza al
-  webview: el frontend solo guarda (`set_chat_webhook`), borra y pide
-  la pista.
+- **Desktop envía desde Rust.** Un comando `team_chat_send(provider,
+  text)`, en `src-tauri/src/extensions/team_chat.rs`, lee la URL del
+  llavero, valida el host y envía con `reqwest` (timeout de 10 s,
+  `redirect::Policy::none()`). La URL nunca cruza al webview.
 - **Mobile envía con `fetch`** (React Native no aplica CORS), con
   `AbortController` para el timeout y `redirect: 'manual'`.
 - **Programado en Desktop:** un intervalo de 1 minuto mientras la app
@@ -257,7 +256,7 @@ cuenta (R29).
 
 ## Clientes (UI)
 
-- **Opciones → Integraciones** (R30):
+- **La tarjeta "Chat del equipo" en Opciones → Extensiones** (R30):
   - proveedor (Google Chat, Slack, Teams);
   - dónde se guarda, si aplica (R2);
   - campo de URL de tipo contraseña, que se vacía después de guardar y
