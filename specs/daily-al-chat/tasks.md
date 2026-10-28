@@ -5,63 +5,82 @@ Estado: en diseño.
 ## Decisiones
 
 - [x] Integración incluida y apagada por defecto, no plugin de terceros.
-- [x] El servidor hace el envío. El manual usa el texto del cliente; el
-  programado lo arma el servidor.
+- [x] No depende del sync: modo local en Desktop y Mobile, y modo
+  cuenta en el servidor (el único de Web).
+- [x] El envío manual usa el texto del cliente; el programado lo arma
+  quien envía (Desktop o el servidor).
 - [x] Proveedores: Google Chat, Slack y Teams (Workflows), por webhook
   entrante.
-- [x] URL cifrada con `INTEGRATIONS_KEY` y una lista fija de hosts por
-  proveedor.
-- [x] Un destino por usuario en v1.
+- [x] URL en almacén seguro: llavero del SO, `expo-secure-store` o
+  cifrada con `INTEGRATIONS_KEY`. Lista fija de hosts por proveedor.
+- [x] Un destino por modo en v1.
 - [ ] Export de datos: qué se incluye (ver PENDIENTE en el design).
 - [ ] Verificar con una URL real los hosts de Teams Workflows.
 
-## Fase 1 — Servidor: configuración y envío manual
+## Fase 1 — Desktop en modo local (no necesita servidor)
+
+Va en `task-manager`, con su propio spec, que referencia este.
+
+- [ ] Rust: crate `keyring` y comandos `set_chat_webhook`,
+  `clear_chat_webhook`, `chat_webhook_hint` y `send_chat_webhook`, con
+  validación de host, `reqwest` sin redirecciones y timeout de 10 s
+  (R10, R11, R18, R19).
+- [ ] Pruebas en Rust de la validación con la tabla de casos del design.
+- [ ] Preferencias locales: proveedor, pista, consentimiento y último
+  resultado (R12, R21).
+- [ ] Opciones → Integraciones y el botón "Enviar al chat" en
+  `DailyEditor` (R15–R17, R20, R30–R32).
+
+## Fase 2 — Servidor (modo cuenta) y Web
 
 - [ ] `internal/security/secretbox.go`: `Seal`/`Open` con AES-256-GCM y
-  dato adicional (R6, R9), con pruebas: ida y vuelta, otro `user_id`
+  dato adicional (R11, R14), con pruebas: ida y vuelta, otro `user_id`
   falla, blob corrupto falla.
 - [ ] `cmd/server/main.go`: leer y validar `INTEGRATIONS_KEY` sin
-  romper el arranque (R1), y documentarla en `.env.example`.
+  romper el arranque (R6), y documentarla en `.env.example`.
 - [ ] Migración `00021_add_chat_integrations.sql` (tabla y columna de
   `instance_settings`).
 - [ ] `settings`: `ChatIntegrationsEnabled`, más el checkbox del panel
-  y su estado deshabilitado sin clave (R2).
-- [ ] `internal/integration/providers.go`: validación de URL por
-  proveedor (R5) y cuerpo por proveedor. Pruebas de tabla con URLs
-  válidas e inválidas: `http`, otro host, host parecido
-  (`chat.googleapis.com.evil.io`) y ruta equivocada.
-- [ ] `store.go`: CRUD de `chat_integrations` (R4, R8) y registro del
-  último resultado (R16).
-- [ ] `handlers.go`: las 5 rutas, con 503, 409, 400, 429 y 502 (R3,
-  R7, R10–R15).
-- [ ] Limitador de 20 envíos por hora por usuario (R12).
+  y su estado deshabilitado sin clave (R7).
+- [ ] `internal/integration/providers.go`: validación (R10) y cuerpo por
+  proveedor. Pruebas de tabla con URLs válidas e inválidas: `http`, otro
+  host, host parecido (`chat.googleapis.com.evil.io`) y ruta
+  equivocada. Son los mismos casos que en Desktop.
+- [ ] `store.go`: CRUD de `chat_integrations` (R9, R13) y registro del
+  último resultado (R21).
+- [ ] `handlers.go`: las 5 rutas, con 503, 409, 400, 429 y 502 (R8,
+  R12, R15–R20).
+- [ ] Limitador de 20 envíos por hora por usuario (R17).
 - [ ] Logs sin URL ni texto. Probar que el log de un envío fallido no
-  incluye la URL (R6).
+  incluye la URL (R11).
 - [ ] Pruebas de handlers contra un `httptest.Server` como proveedor:
   - 2xx;
   - 500;
   - timeout;
-  - redirección no seguida (R14);
+  - redirección no seguida (R19);
   - que la respuesta nunca incluye la URL.
-- [ ] `openapi.yaml` y `specs/README.md` (índice).
+- [ ] `openapi.yaml`.
+- [ ] Web: Opciones → Integraciones y el botón, solo en modo cuenta (R5,
+  R30, R31).
+- [ ] Desktop: elegir el modo, enviar por la cuenta y pasar de local a
+  cuenta (R2–R4).
 
-## Fase 2 — Clientes: Integraciones y "Enviar al chat"
+## Fase 3 — Mobile
 
-Cada repo con su spec y su PR, en paralelo contra el contrato de la
-fase 1.
+- [ ] Modo local con `expo-secure-store` y `fetch`, solo el envío
+  manual (R1, R23).
+- [ ] Modo cuenta y elección del modo (R2–R4).
 
-- [ ] Desktop: Opciones → Integraciones y el botón en `DailyEditor`
-  (R23–R25).
-- [ ] Web: lo mismo.
-- [ ] Mobile: lo mismo, con el texto de `dailyCopyText.ts`.
+## Fase 4 — Envío programado
 
-## Fase 3 — Envío programado
-
-- [ ] Port de `colombianHolidays.ts` a Go, con casos dorados de 2025 a
-  2030 generados desde Desktop (R18).
-- [ ] `buildDailyText`, con casos dorados de texto (R21).
-- [ ] `scheduler.go`: ticker de 1 minuto con las reglas de R17–R22.
-  Pruebas con un reloj inyectado:
+- [ ] Desktop en modo local: intervalo de 1 minuto con las reglas
+  comunes, la ventana de 30 min al abrir la app, y deshabilitado si hay
+  integración en la cuenta (R22–R29).
+- [ ] Servidor: port de `colombianHolidays.ts` y de `buildDailyCopyText`
+  a Go, con casos dorados de 2025 a 2030 generados desde Desktop (R24,
+  R27).
+- [ ] Servidor: `scheduler.go`, con un ticker de 1 minuto. Pruebas con
+  un reloj inyectado:
   - antes de la hora;
   - a la hora;
   - 31 min tarde;
