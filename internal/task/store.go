@@ -29,7 +29,13 @@ func NewStore(sqlDB *sql.DB) *store {
 // upsertTask creates t or, if a task with t.ID already exists, updates
 // it — provided t belongs to the same user and t.UpdatedAt is newer
 // than what's stored (LWW by whole row, see specs/sync-incremental).
-func (s *store) upsertTask(ctx context.Context, t *Task) (*Task, error) {
+//
+// writeProgress says whether t.Progress came in the request at all.
+// When it didn't, an existing row keeps its stored progress instead of
+// having it wiped to NULL: clients published before the field existed
+// never send it, and a POST from one of them over an existing task
+// mustn't erase the progress another device set.
+func (s *store) upsertTask(ctx context.Context, t *Task, writeProgress bool) (*Task, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("beginning transaction: %w", err)
@@ -37,8 +43,9 @@ func (s *store) upsertTask(ctx context.Context, t *Task) (*Task, error) {
 	defer func() { _ = tx.Rollback() }()
 
 	var existingUserID, existingUpdatedAt string
-	err = tx.QueryRowContext(ctx, `SELECT user_id, updated_at FROM tasks WHERE id = ?`, t.ID).
-		Scan(&existingUserID, &existingUpdatedAt)
+	var existingProgress *int
+	err = tx.QueryRowContext(ctx, `SELECT user_id, updated_at, progress FROM tasks WHERE id = ?`, t.ID).
+		Scan(&existingUserID, &existingUpdatedAt, &existingProgress)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		// New row, nothing to check.
@@ -55,6 +62,9 @@ func (s *store) upsertTask(ctx context.Context, t *Task) (*Task, error) {
 		if !t.UpdatedAt.After(existing) {
 			return nil, errConflict
 		}
+		if !writeProgress {
+			t.Progress = existingProgress
+		}
 	}
 
 	seq, err := db.NextSeq(ctx, tx, t.UserID)
@@ -69,8 +79,8 @@ func (s *store) upsertTask(ctx context.Context, t *Task) (*Task, error) {
 	}
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO tasks (id, user_id, title, task_code, status, tags, project, created, completed_at, due, content, seq, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO tasks (id, user_id, title, task_code, status, tags, project, created, completed_at, due, content, progress, seq, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			title = excluded.title,
 			task_code = excluded.task_code,
@@ -81,12 +91,13 @@ func (s *store) upsertTask(ctx context.Context, t *Task) (*Task, error) {
 			completed_at = excluded.completed_at,
 			due = excluded.due,
 			content = excluded.content,
+			progress = excluded.progress,
 			seq = excluded.seq,
 			updated_at = excluded.updated_at,
 			deleted_at = NULL
 	`,
 		t.ID, t.UserID, t.Title, t.TaskCode, t.Status, string(tagsJSON), t.Project,
-		t.Created, t.CompletedAt, t.Due, t.Content, t.Seq, formatTime(t.UpdatedAt),
+		t.Created, t.CompletedAt, t.Due, t.Content, t.Progress, t.Seq, formatTime(t.UpdatedAt),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("upserting task: %w", err)
@@ -152,6 +163,7 @@ type Patch struct {
 	CompletedAt db.Field[*string]
 	Due         db.Field[*string]
 	Content     db.Field[string]
+	Progress    db.Field[*int]
 }
 
 // patchTask merges patch into task id field by field, each field
@@ -169,7 +181,7 @@ func (s *store) patchTask(ctx context.Context, id, userID string, patch Patch, u
 	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, user_id, title, task_code, status, tags, project, created, completed_at, due, content, seq, updated_at, deleted_at, field_updated_at
+		SELECT id, user_id, title, task_code, status, tags, project, created, completed_at, due, content, progress, seq, updated_at, deleted_at, field_updated_at
 		FROM tasks WHERE id = ?
 	`, id)
 	if err != nil {
@@ -232,6 +244,10 @@ func (s *store) patchTask(ctx context.Context, id, userID string, patch Patch, u
 		current.Content = patch.Content.Value
 		changed = true
 	}
+	if patch.Progress.Set && ft.Wins("progress", updatedAt) {
+		current.Progress = patch.Progress.Value
+		changed = true
+	}
 
 	if !changed {
 		return &current, false, nil
@@ -257,12 +273,12 @@ func (s *store) patchTask(ctx context.Context, id, userID string, patch Patch, u
 	_, err = tx.ExecContext(ctx, `
 		UPDATE tasks SET
 			title = ?, task_code = ?, status = ?, tags = ?, project = ?, created = ?,
-			completed_at = ?, due = ?, content = ?, seq = ?, updated_at = ?, deleted_at = NULL,
+			completed_at = ?, due = ?, content = ?, progress = ?, seq = ?, updated_at = ?, deleted_at = NULL,
 			field_updated_at = ?
 		WHERE id = ?
 	`,
 		current.Title, current.TaskCode, current.Status, string(tagsJSON), current.Project, current.Created,
-		current.CompletedAt, current.Due, current.Content, current.Seq, formatTime(current.UpdatedAt),
+		current.CompletedAt, current.Due, current.Content, current.Progress, current.Seq, formatTime(current.UpdatedAt),
 		ftEncoded, id,
 	)
 	if err != nil {
@@ -277,7 +293,7 @@ func (s *store) patchTask(ctx context.Context, id, userID string, patch Patch, u
 
 func (s *store) listTasks(ctx context.Context, userID string) ([]Task, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, user_id, title, task_code, status, tags, project, created, completed_at, due, content, seq, updated_at, deleted_at
+		SELECT id, user_id, title, task_code, status, tags, project, created, completed_at, due, content, progress, seq, updated_at, deleted_at
 		FROM tasks WHERE user_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC
 	`, userID)
 	if err != nil {
@@ -306,7 +322,7 @@ func (s *store) listTasks(ctx context.Context, userID string) ([]Task, error) {
 // unexported store type, so sync doesn't need to name it.
 func ChangesSince(ctx context.Context, sqlDB *sql.DB, userID string, since int64) ([]Task, error) {
 	rows, err := sqlDB.QueryContext(ctx, `
-		SELECT id, user_id, title, task_code, status, tags, project, created, completed_at, due, content, seq, updated_at, deleted_at
+		SELECT id, user_id, title, task_code, status, tags, project, created, completed_at, due, content, progress, seq, updated_at, deleted_at
 		FROM tasks WHERE user_id = ? AND seq > ? ORDER BY seq ASC
 	`, userID, since)
 	if err != nil {
@@ -334,7 +350,7 @@ func scanTask(row *sql.Rows) (Task, error) {
 	var deletedAt sql.NullString
 	if err := row.Scan(
 		&t.ID, &t.UserID, &t.Title, &t.TaskCode, &t.Status, &tags, &t.Project,
-		&t.Created, &t.CompletedAt, &t.Due, &t.Content, &t.Seq, &updatedAt, &deletedAt,
+		&t.Created, &t.CompletedAt, &t.Due, &t.Content, &t.Progress, &t.Seq, &updatedAt, &deletedAt,
 	); err != nil {
 		return Task{}, fmt.Errorf("scanning task: %w", err)
 	}
@@ -378,7 +394,7 @@ func scanTaskWithFieldTimestamps(rows *sql.Rows) (Task, string, error) {
 	var deletedAt sql.NullString
 	if err := rows.Scan(
 		&t.ID, &t.UserID, &t.Title, &t.TaskCode, &t.Status, &tags, &t.Project,
-		&t.Created, &t.CompletedAt, &t.Due, &t.Content, &t.Seq, &updatedAt, &deletedAt, &fieldUpdatedAt,
+		&t.Created, &t.CompletedAt, &t.Due, &t.Content, &t.Progress, &t.Seq, &updatedAt, &deletedAt, &fieldUpdatedAt,
 	); err != nil {
 		return Task{}, "", fmt.Errorf("scanning task: %w", err)
 	}

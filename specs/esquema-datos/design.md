@@ -84,6 +84,7 @@ Le pasa a cualquier usuario con dos clientes escribiendo a la vez.
 | completed_at | TEXT NULL | igual que `created`; solo cuenta si `status = 'done'`; NULL omite la clave en el JSON |
 | due | TEXT NULL | fecha de calendario `YYYY-MM-DD` local, sin hora ni zona; sin validar |
 | content | TEXT | markdown, LWW por fila completa (ver limitación v1) |
+| progress | INTEGER NULL CHECK (progress IS NULL OR progress BETWEEN 0 AND 100) | porcentaje 0–100; NULL = sin progreso, siempre presente en el JSON (`null` explícito). Migración `00021`. Ver `requirements.md`, "Progreso de tareas" |
 | seq | INTEGER | |
 | updated_at | TIMESTAMPTZ | |
 | deleted_at | TIMESTAMPTZ NULL | |

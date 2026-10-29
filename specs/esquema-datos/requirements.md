@@ -77,6 +77,40 @@ todavía vienen en colas offline o en frontmatter editado a mano. Detalle
 en el vault: `02 Decisiones/Fechas de creación y edición como instantes
 ISO.md`.
 
+### Progreso de tareas (decisión del 29 oct 2026)
+
+`Task.progress` es un porcentaje opcional: entero de 0 a 100, o `null`
+= sin progreso. `null` no equivale a `0`: "sin progreso" es la tarea
+que no lleva porcentaje, `0` es la que lo lleva y va en cero.
+
+- El sistema DEBERÁ aceptar `progress` en `POST /tasks` y en
+  `PATCH /tasks/{id}` solo como entero JSON entre 0 y 100, o `null`.
+- Si `progress` llega fuera de rango o no es un entero JSON (`-1`,
+  `101`, `40.5`, `40.0`, `1e2`, `"40"`), el sistema DEBERÁ responder
+  `400` con el mensaje `progress must be an integer between 0 and
+  100, or null`, sin escribir nada.
+- En `PATCH`, `progress` DEBERÁ resolverse por LWW de campo como el
+  resto (clave `progress` en `field_updated_at`): `null` lo borra y la
+  clave ausente no lo toca.
+- En `POST`, `null` DEBERÁ dejar la tarea sin progreso. Si la clave
+  falta, una tarea nueva DEBERÁ quedar sin progreso y una existente
+  DEBERÁ conservar el que tenía.
+- El sistema DEBERÁ incluir `progress` en toda respuesta que serialice
+  una tarea (`GET /tasks`, `POST`, `PATCH`, `data` de `/sync/changes`,
+  y por tanto el resync completo), siempre con la clave presente:
+  `null` explícito cuando no hay progreso.
+- Un cliente DEBERÁ tratar la clave ausente igual que `null` al leer,
+  porque un servidor anterior a este cambio no la manda.
+
+Por qué: la extensión de OpenProject de Desktop necesita mostrar el
+`percentageDone` de un work package, y otros orígenes pueden usarlo
+igual. Que el `POST` sin la clave conserve el valor existente protege a
+los clientes ya publicados, que no conocen el campo: si reenvían una
+tarea entera no deben borrar el progreso que puso otro dispositivo. La
+clave siempre presente en la respuesta (a diferencia de `task_code`,
+`completed_at` y `due`, que se omiten si son `null`) deja explícito que
+el servidor conoce el campo y que la tarea no tiene progreso.
+
 ## Fuera de este spec
 
 - Migración/backfill de datos existentes desde los archivos locales de

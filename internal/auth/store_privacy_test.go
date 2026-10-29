@@ -84,8 +84,8 @@ func TestExportAndDeleteUserAccount(t *testing.T) {
 	u := mustCreateUser(t, s, ctx, "member@example.com", false)
 
 	if _, err := s.db.ExecContext(ctx,
-		`INSERT INTO tasks (id, user_id, title, status, created, seq, updated_at)
-		 VALUES ('task-1', ?, 'Una tarea', 'todo', '2026-01-01T00:00:00Z', 1, '2026-01-01T00:00:00Z')`,
+		`INSERT INTO tasks (id, user_id, title, status, created, progress, seq, updated_at)
+		 VALUES ('task-1', ?, 'Una tarea', 'todo', '2026-01-01T00:00:00Z', 40, 1, '2026-01-01T00:00:00Z')`,
 		u.ID); err != nil {
 		t.Fatalf("seeding a task: %v", err)
 	}
@@ -107,6 +107,10 @@ func TestExportAndDeleteUserAccount(t *testing.T) {
 	tasks, ok := data["tasks"].([]map[string]any)
 	if !ok || len(tasks) != 1 || tasks[0]["id"] != "task-1" {
 		t.Fatalf("expected exactly the seeded task in the export, got %v", data["tasks"])
+	}
+	// SELECT * genérico: columnas nuevas como progress entran solas.
+	if p, ok := tasks[0]["progress"].(int64); !ok || p != 40 {
+		t.Fatalf("expected the task's progress (40) in the export, got %v", tasks[0]["progress"])
 	}
 	absences, ok := data["absence_days"].([]map[string]any)
 	if !ok || len(absences) != 1 || absences[0]["type"] != "incapacidad" {
