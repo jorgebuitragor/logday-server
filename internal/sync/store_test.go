@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -321,5 +322,38 @@ func TestChangesSinceRejectsCursorAheadOfServer(t *testing.T) {
 	}
 	if changes, err := s.changesSince(ctx, "user-1", 0, 0); err != nil || len(changes) != 1 {
 		t.Fatalf("a full resync must still work: got %v, %v", changes, err)
+	}
+}
+
+// TestChangesSinceCarriesTaskProgress: el pull (y el resync completo,
+// que es el mismo feed con since=0) trae Task.progress en data, con
+// null explícito cuando no hay progreso (specs/esquema-datos,
+// "Progreso de tareas").
+func TestChangesSinceCarriesTaskProgress(t *testing.T) {
+	s, database := newTestStore(t)
+	ctx := context.Background()
+
+	insertTaskFixture(t, database, "with-progress", "user-1", 1, false)
+	insertTaskFixture(t, database, "without-progress", "user-1", 2, false)
+	if _, err := database.Exec(`UPDATE tasks SET progress = 40 WHERE id = 'with-progress'`); err != nil {
+		t.Fatalf("setting progress fixture: %v", err)
+	}
+
+	changes, err := s.changesSince(ctx, "user-1", 0, 0)
+	if err != nil {
+		t.Fatalf("changesSince: %v", err)
+	}
+	if len(changes) != 2 {
+		t.Fatalf("expected 2 changes, got %d", len(changes))
+	}
+	for i, want := range []string{"40", "null"} {
+		var data map[string]json.RawMessage
+		if err := json.Unmarshal(changes[i].Data, &data); err != nil {
+			t.Fatalf("decoding changes[%d].data: %v", i, err)
+		}
+		got, ok := data["progress"]
+		if !ok || string(got) != want {
+			t.Fatalf("changes[%d].data.progress = %q (present=%v), want %s", i, got, ok, want)
+		}
 	}
 }

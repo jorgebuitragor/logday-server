@@ -41,17 +41,21 @@ func (h *Handler) Routes(r chi.Router) {
 }
 
 type taskRequest struct {
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	TaskCode    *string   `json:"task_code"`
-	Status      string    `json:"status"`
-	Tags        []string  `json:"tags"`
-	Project     string    `json:"project"`
-	Created     string    `json:"created"`
-	CompletedAt *string   `json:"completed_at"`
-	Due         *string   `json:"due"`
-	Content     string    `json:"content"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	TaskCode    *string  `json:"task_code"`
+	Status      string   `json:"status"`
+	Tags        []string `json:"tags"`
+	Project     string   `json:"project"`
+	Created     string   `json:"created"`
+	CompletedAt *string  `json:"completed_at"`
+	Due         *string  `json:"due"`
+	Content     string   `json:"content"`
+	// Progress stays raw so create can tell "absent" (len 0) from an
+	// explicit null, and answer a non-integer with the same message as
+	// an out-of-range value instead of a generic decode error.
+	Progress  json.RawMessage `json:"progress"`
+	UpdatedAt time.Time       `json:"updated_at"`
 }
 
 func (req taskRequest) toTask(userID string) Task {
@@ -64,6 +68,27 @@ func (req taskRequest) toTask(userID string) Task {
 		Status: req.Status, Tags: tags, Project: req.Project, Created: req.Created,
 		CompletedAt: req.CompletedAt, Due: req.Due, Content: req.Content, UpdatedAt: req.UpdatedAt,
 	}
+}
+
+// errInvalidProgress is the 400 message for any bad progress value,
+// whether it's out of range or not an integer at all.
+var errInvalidProgress = errors.New("progress must be an integer between 0 and 100, or null")
+
+// decodeProgress parses a raw progress value: absent or null mean "no
+// progress" (nil), anything else must be a JSON integer in [0, 100] —
+// 40.5, 40.0, 1e2 and "40" are all rejected.
+func decodeProgress(raw json.RawMessage) (*int, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var v int
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, errInvalidProgress
+	}
+	if v < 0 || v > 100 {
+		return nil, errInvalidProgress
+	}
+	return &v, nil
 }
 
 func validateTaskRequest(req taskRequest) error {
@@ -82,6 +107,9 @@ func validateTaskRequest(req taskRequest) error {
 	if req.UpdatedAt.IsZero() {
 		return errors.New("updated_at is required")
 	}
+	if _, err := decodeProgress(req.Progress); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -99,7 +127,9 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	t := req.toTask(userID)
-	h.upsert(w, r, &t)
+	// Already validated above, so the error can't happen here.
+	t.Progress, _ = decodeProgress(req.Progress)
+	h.upsert(w, r, &t, len(req.Progress) > 0)
 }
 
 // parsePatch reads a PATCH body's raw fields into a Patch,
@@ -134,6 +164,15 @@ func parsePatch(raw map[string]json.RawMessage) (Patch, error) {
 	}
 	if patch.Content, err = db.PatchField[string](raw, "content"); err != nil {
 		return Patch{}, err
+	}
+	// progress is decoded by hand instead of db.PatchField[*int] so that
+	// a non-integer gets the same 400 message as an out-of-range value.
+	if v, ok := raw["progress"]; ok {
+		progress, err := decodeProgress(v)
+		if err != nil {
+			return Patch{}, err
+		}
+		patch.Progress = db.Field[*int]{Set: true, Value: progress}
 	}
 	return patch, nil
 }
@@ -195,8 +234,8 @@ func (h *Handler) patch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stored)
 }
 
-func (h *Handler) upsert(w http.ResponseWriter, r *http.Request, t *Task) {
-	stored, err := h.store.upsertTask(r.Context(), t)
+func (h *Handler) upsert(w http.ResponseWriter, r *http.Request, t *Task, writeProgress bool) {
+	stored, err := h.store.upsertTask(r.Context(), t, writeProgress)
 	if err != nil {
 		switch {
 		case errors.Is(err, errForbidden):

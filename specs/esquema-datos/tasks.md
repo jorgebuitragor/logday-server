@@ -62,3 +62,11 @@ validadas end-to-end.
       `TestConcurrentCreateAndContentUpdate` (`internal/note`). Los dos
       fallan sin el cambio. Ver `design.md`, "Conexión y escrituras
       concurrentes".
+- [x] `Task.progress` (29 oct 2026): migración `00021` (columna
+      nullable con CHECK 0–100), aceptado en `POST`/`PATCH` con
+      validación 400, LWW por campo en `PATCH`, y presente en `GET`,
+      respuestas de escritura y `/sync/changes`. El export de cuenta lo
+      incluye solo (usa `SELECT *`). Tests en
+      `internal/task/progress_test.go`,
+      `TestChangesSinceCarriesTaskProgress` (`internal/sync`) y
+      `TestExportAndDeleteUserAccount` (`internal/auth`).

@@ -1514,6 +1514,23 @@ components:
           example: "2026-10-31"
         content:
           type: string
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          nullable: true
+          description: |
+            Progreso de la tarea en porcentaje: entero de 0 a 100, o `null` =
+            sin progreso (no es lo mismo que `0`). Opcional. En `POST`, `null`
+            lo deja sin progreso; si la clave falta, una tarea nueva queda sin
+            progreso y una existente conserva el que tenía (los clientes
+            anteriores al campo no lo mandan y no deben borrarlo). Solo se
+            aceptan enteros JSON: `-1`, `101`, `40.5`, `40.0`, `1e2` o `"40"`
+            responden `400` con el mensaje
+            `progress must be an integer between 0 and 100, or null`. La
+            respuesta (`Task`, `/sync/changes`) siempre trae la clave, con
+            `null` explícito cuando no hay progreso.
+          example: 40
         updated_at:
           type: string
           format: date-time
@@ -1578,6 +1595,19 @@ components:
           example: "2026-10-31"
         content:
           type: string
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          nullable: true
+          description: |
+            Entero de 0 a 100. `null` lo borra (la tarea queda sin progreso);
+            si la clave falta, no se toca. LWW por campo como el resto (clave
+            `progress` en `field_updated_at`). Cualquier otro valor (fuera de
+            rango o no entero: `40.5`, `"40"`…) responde `400` con el mensaje
+            `progress must be an integer between 0 and 100, or null`. Ver
+            `TaskWrite.progress`.
+          example: 40
         updated_at:
           type: string
           format: date-time

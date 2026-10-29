@@ -44,7 +44,7 @@ func TestUpsertTaskCreatesAndRoundTrips(t *testing.T) {
 	ctx := context.Background()
 
 	in := sampleTask("user-1", time.Now())
-	stored, err := s.upsertTask(ctx, in)
+	stored, err := s.upsertTask(ctx, in, true)
 	if err != nil {
 		t.Fatalf("upsertTask: %v", err)
 	}
@@ -66,20 +66,20 @@ func TestUpsertTaskRejectsStaleWrite(t *testing.T) {
 	ctx := context.Background()
 
 	base := time.Now()
-	if _, err := s.upsertTask(ctx, sampleTask("user-1", base)); err != nil {
+	if _, err := s.upsertTask(ctx, sampleTask("user-1", base), true); err != nil {
 		t.Fatalf("initial upsertTask: %v", err)
 	}
 
 	stale := sampleTask("user-1", base.Add(-time.Minute))
 	stale.Title = "a stale edit"
-	_, err := s.upsertTask(ctx, stale)
+	_, err := s.upsertTask(ctx, stale, true)
 	if !errors.Is(err, errConflict) {
 		t.Fatalf("expected errConflict, got %v", err)
 	}
 
 	newer := sampleTask("user-1", base.Add(time.Minute))
 	newer.Title = "a newer edit"
-	if _, err := s.upsertTask(ctx, newer); err != nil {
+	if _, err := s.upsertTask(ctx, newer, true); err != nil {
 		t.Fatalf("newer upsertTask: %v", err)
 	}
 
@@ -96,12 +96,12 @@ func TestUpsertTaskRejectsCrossUserOwnership(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	if _, err := s.upsertTask(ctx, sampleTask("user-1", time.Now())); err != nil {
+	if _, err := s.upsertTask(ctx, sampleTask("user-1", time.Now()), true); err != nil {
 		t.Fatalf("initial upsertTask: %v", err)
 	}
 
 	other := sampleTask("user-2", time.Now().Add(time.Minute))
-	_, err := s.upsertTask(ctx, other)
+	_, err := s.upsertTask(ctx, other, true)
 	if !errors.Is(err, errForbidden) {
 		t.Fatalf("expected errForbidden, got %v", err)
 	}
@@ -111,7 +111,7 @@ func TestSoftDeleteRemovesFromListAndChecksOwnership(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	if _, err := s.upsertTask(ctx, sampleTask("user-1", time.Now())); err != nil {
+	if _, err := s.upsertTask(ctx, sampleTask("user-1", time.Now()), true); err != nil {
 		t.Fatalf("upsertTask: %v", err)
 	}
 
@@ -141,7 +141,7 @@ func TestUpsertTaskAfterSoftDeleteResurrectsRow(t *testing.T) {
 	ctx := context.Background()
 
 	base := time.Now()
-	if _, err := s.upsertTask(ctx, sampleTask("user-1", base)); err != nil {
+	if _, err := s.upsertTask(ctx, sampleTask("user-1", base), true); err != nil {
 		t.Fatalf("initial upsertTask: %v", err)
 	}
 	if _, err := s.softDelete(ctx, "task-1", "user-1"); err != nil {
@@ -150,7 +150,7 @@ func TestUpsertTaskAfterSoftDeleteResurrectsRow(t *testing.T) {
 
 	recreated := sampleTask("user-1", base.Add(time.Minute))
 	recreated.Title = "recreated after delete"
-	if _, err := s.upsertTask(ctx, recreated); err != nil {
+	if _, err := s.upsertTask(ctx, recreated, true); err != nil {
 		t.Fatalf("upsertTask after delete: %v", err)
 	}
 
@@ -175,7 +175,7 @@ func TestPatchTaskAppliesIndependentFields(t *testing.T) {
 	ctx := context.Background()
 
 	base := time.Now()
-	if _, err := s.upsertTask(ctx, sampleTask("user-1", base)); err != nil {
+	if _, err := s.upsertTask(ctx, sampleTask("user-1", base), true); err != nil {
 		t.Fatalf("initial upsertTask: %v", err)
 	}
 
@@ -211,7 +211,7 @@ func TestPatchTaskDiscardsStaleFieldSilently(t *testing.T) {
 	ctx := context.Background()
 
 	base := time.Now()
-	if _, err := s.upsertTask(ctx, sampleTask("user-1", base)); err != nil {
+	if _, err := s.upsertTask(ctx, sampleTask("user-1", base), true); err != nil {
 		t.Fatalf("initial upsertTask: %v", err)
 	}
 
@@ -240,7 +240,7 @@ func TestPatchTaskAllFieldsStaleReturns200NoSeqBump(t *testing.T) {
 	ctx := context.Background()
 
 	base := time.Now()
-	if _, err := s.upsertTask(ctx, sampleTask("user-1", base)); err != nil {
+	if _, err := s.upsertTask(ctx, sampleTask("user-1", base), true); err != nil {
 		t.Fatalf("initial upsertTask: %v", err)
 	}
 	// Give "title" a real field_updated_at first — a completely fresh
@@ -275,7 +275,7 @@ func TestPatchTaskOnFreshRowAcceptsAnyTimestamp(t *testing.T) {
 	ctx := context.Background()
 
 	base := time.Now()
-	if _, err := s.upsertTask(ctx, sampleTask("user-1", base)); err != nil {
+	if _, err := s.upsertTask(ctx, sampleTask("user-1", base), true); err != nil {
 		t.Fatalf("initial upsertTask: %v", err)
 	}
 
@@ -296,7 +296,7 @@ func TestPatchTaskRejectsCrossUserOwnership(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	if _, err := s.upsertTask(ctx, sampleTask("user-1", time.Now())); err != nil {
+	if _, err := s.upsertTask(ctx, sampleTask("user-1", time.Now()), true); err != nil {
 		t.Fatalf("initial upsertTask: %v", err)
 	}
 
@@ -326,7 +326,7 @@ func TestPatchTaskNullableFieldExplicitNullClears(t *testing.T) {
 	in := sampleTask("user-1", base)
 	code := "TASK-1"
 	in.TaskCode = &code
-	if _, err := s.upsertTask(ctx, in); err != nil {
+	if _, err := s.upsertTask(ctx, in, true); err != nil {
 		t.Fatalf("initial upsertTask: %v", err)
 	}
 
@@ -344,13 +344,13 @@ func TestListTasksIsScopedToUser(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	if _, err := s.upsertTask(ctx, sampleTask("user-1", time.Now())); err != nil {
+	if _, err := s.upsertTask(ctx, sampleTask("user-1", time.Now()), true); err != nil {
 		t.Fatalf("upsertTask: %v", err)
 	}
 
 	other := sampleTask("user-2", time.Now())
 	other.ID = "task-2"
-	if _, err := s.upsertTask(ctx, other); err != nil {
+	if _, err := s.upsertTask(ctx, other, true); err != nil {
 		t.Fatalf("upsertTask for user-2: %v", err)
 	}
 
@@ -389,7 +389,7 @@ func TestUpsertTaskKeepsDateStampsVerbatim(t *testing.T) {
 			in.CompletedAt = &completed
 			due := "2026-10-31"
 			in.Due = &due
-			if _, err := s.upsertTask(ctx, in); err != nil {
+			if _, err := s.upsertTask(ctx, in, true); err != nil {
 				t.Fatalf("upsertTask: %v", err)
 			}
 
@@ -421,7 +421,7 @@ func TestPatchTaskKeepsDateStampsVerbatim(t *testing.T) {
 			ctx := context.Background()
 
 			base := time.Now()
-			if _, err := s.upsertTask(ctx, sampleTask("user-1", base)); err != nil {
+			if _, err := s.upsertTask(ctx, sampleTask("user-1", base), true); err != nil {
 				t.Fatalf("initial upsertTask: %v", err)
 			}
 
