@@ -7,7 +7,7 @@ Estado: en diseño. Requisitos en `requirements.md` (P1–P29).
 ### Tabla `templates`
 
 Una fila por usuario y tipo: la plantilla **activa**. Si no hay fila, o
-está borrada, se usa la genérica de Logday (P3). Misma forma que
+está borrada, se usa la FCV, que es la de hoy (P3). Misma forma que
 `overtime_month_meta`, con clave natural y sin id del cliente.
 
 ```sql
@@ -28,8 +28,8 @@ CREATE INDEX idx_templates_user_id_seq ON templates (user_id, seq);
 ```
 
 - Una plantilla incluida (`builtin`) se guarda por su clave, sin contenido.
-  Así la migración escribe una fila pequeña, igual en todos lados (P9), y
-  una corrección de la FCV llega con la versión de la app.
+  Así la fila es pequeña y una corrección de una incluida llega con la
+  versión de la app.
 - Un campo para cada cosa, no un JSON: el panel admin puede mostrar qué
   plantilla usa cada uno sin abrir el contenido.
 - **LWW por campo con escrituras completas.** El cliente siempre manda
@@ -45,18 +45,17 @@ CREATE INDEX idx_templates_user_id_seq ON templates (user_id, seq);
   Validaciones (P26): `kind` y `source` conocidos; `builtin_key` presente
   si y solo si `source = builtin`; `content` hasta 1,5 MB (413 si pasa).
   El servidor no decodifica ni abre el base64.
-- `DELETE /templates/{kind}`: borrado lógico ("Usar la de Logday").
+- `DELETE /templates/{kind}`: borrado lógico (vuelve a la predeterminada).
 - `/sync/changes` y `/ws` agregan `entity_type: template`, con `kind` como
   id sintético (igual que `year_month`).
 - `GET /account/export` incluye `templates` y borrar la cuenta las borra
   (P29). Va en el mismo paquete de dominio: `internal/template/`.
 
-### Sin migración de datos en el servidor (P8)
+### Sin migración de datos (P6)
 
-La migración del servidor solo crea la tabla. Los usuarios de la FCV no
-usan servidor, así que conservar su plantilla es cosa de cada cliente
-(§4). Quien sí usa sync (Jorge) recibe la FCV porque su Desktop la activa
-y la sube como cualquier otro cambio.
+La migración del servidor solo crea la tabla. Como la predeterminada sigue
+siendo la FCV, ningún cliente ni el servidor tiene que escribir nada al
+actualizar.
 
 ### Compatibilidad entre versiones
 
@@ -204,40 +203,19 @@ entrada (contra zips bomba).
 - **Mobile:** tabla `templates` en SQLite (misma forma), con el contenido en
   base64.
 
-### Migración de cada cliente (P6, P7, P10)
-
-Una marca `templatesMigrated` por instalación (en `config.json` en
-Desktop y en AsyncStorage en Mobile):
-
-- Si no está y hay una instalación anterior, se escriben las dos filas FCV
-  `builtin`, salvo que ya haya una fila de ese tipo. En Desktop, la
-  instalación anterior se reconoce porque `config.json` ya tiene
-  `basePath`; en Mobile, porque la base local ya existía o hay una sesión
-  guardada. Después se pone la marca.
-  - Con sesión de sync, primero se trae `/sync/changes`, para no escribir
-    encima de lo que ya subió otro equipo (P6). Si ya llegó una fila, no
-    hay nada que escribir.
-- Si no está y la instalación es nueva (la bienvenida de Desktop, el primer
-  inicio de Mobile), solo se pone la marca (P7).
-- Web no tiene instalación: se queda con lo que diga el servidor, que es
-  lo que subieron los otros equipos del usuario.
-
-Como la fila FCV es igual en todos los equipos (clave natural, `builtin`,
-sin contenido), si dos equipos la escriben, el LWW deja una sola y con lo
-mismo (P9).
-
 ### Interfaz
 
 Una sección nueva en Opciones, "Plantillas", en el grupo de datos, con dos
 tarjetas:
 
-- **Mensaje del Daily:** el nombre de la activa ("Logday", "FCV" o la
-  propia) y un editor de texto con los marcadores como chips para
-  insertar. Debajo, una vista previa con el Daily de hoy y los avisos (P14),
-  más "Usar la de Logday" (P22).
-- **Excel de horas extra:** el nombre y la fecha de carga, y las acciones
-  "Cargar plantilla (.xlsx)", "Descargar la plantilla actual", "Descargar
-  la de Logday" y "Usar la de Logday" (P21, P22). Al cargar: la validación
+- **Mensaje del Daily:** un selector "FCV · Logday · Propia" (P5) y un
+  editor de texto con los marcadores como chips para insertar. Editar una
+  incluida la copia como "Propia", y las incluidas no cambian. Debajo, una
+  vista previa con el Daily de hoy y los avisos (P14).
+- **Excel de horas extra:** el mismo selector, con el nombre y la fecha de
+  carga de la propia, y las acciones "Cargar plantilla (.xlsx)",
+  "Descargar la plantilla actual" y "Descargar la FCV" o "Descargar la de
+  Logday" como punto de partida (P21, P22). Al cargar: la validación
   (P18), los marcadores encontrados, los avisos (P19) y "Descargar un
   ejemplo" antes de "Activar" (P20).
 
@@ -255,6 +233,9 @@ antes de implementar.
   servidor (local-first).
 - **Plantillas como preferencia local:** se perderían al cambiar de equipo,
   y Web, Desktop y Mobile darían resultados distintos.
-- **Dejar la FCV como predeterminada y la genérica como opcional:** es lo
-  contrario de lo pedido. La migración da el mismo resultado a quien ya la
-  usa sin que haga nada.
+- **Hacer la de Logday la predeterminada, con una migración que deje la
+  FCV a las instalaciones de antes:** era la primera versión de este spec.
+  Jorge la cambió el 1 nov 2026 por algo menos invasivo: la FCV sigue
+  siendo la predeterminada, no se migra nada y la de Logday es una opción
+  más. Si más adelante conviene cambiar la predeterminada, está en
+  "Pendiente de decisión".

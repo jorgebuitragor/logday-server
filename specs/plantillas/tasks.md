@@ -11,8 +11,9 @@ servidor y los tres clientes en paralelo, cada uno en su repo.
   ignoran un `entity_type` desconocido en `/sync/changes` y en `/ws` (P25).
   Si alguno falla, agregar `?types=` al contrato (design §1,
   "Compatibilidad").
-- [ ] T2. Jorge decide si la plantilla por instancia queda para v2
-  (`requirements.md`, "Pendiente de decisión").
+- [ ] T2. Jorge confirma los pendientes de `requirements.md`: que la
+  plantilla por instancia y el cambio de la predeterminada quedan fuera de
+  v1.
 - [ ] T3. `logday-design`: el texto de la plantilla genérica del Daily (es y
   en), el `.xlsx` genérico y la sección "Plantillas" de Opciones. Lo
   aprueba Jorge.
@@ -31,8 +32,9 @@ servidor y los tres clientes en paralelo, cada uno en su repo.
   las validaciones de P26 y la exigencia de todos los campos. Tests.
 - [ ] T8. Sumar `template` a `/sync/changes`, `/ws`, `/account/export` y al
   borrado de la cuenta (P29). Tests.
-- [ ] T9. ~~Migración de datos con las filas FCV~~: quitada, porque la
-  FCV no usa servidor (P8). La migración de T6 solo crea la tabla.
+- [ ] T9. ~~Migración de datos con las filas FCV~~: quitada. La FCV sigue
+  siendo la predeterminada (P3, P6), así que la migración de T6 solo crea la
+  tabla.
 - [ ] T10. `openapi.yaml`: `Template`, `TemplateWrite`, las rutas y el
   `entity_type` nuevo.
 
@@ -54,9 +56,8 @@ servidor y los tres clientes en paralelo, cada uno en su repo.
 - [ ] T14. Store: la plantilla activa por tipo, el archivo en
   `<basePath>/.logday/plantillas/` y el sync de `template`, con la cola
   "pendiente de subir" para el 404 (P24).
-- [ ] T15. Migración con `templatesMigrated` (P6, P7, P10). Tests: una
-  config vieja (FCV), la bienvenida (Logday), una fila que llegó por sync
-  (no se pisa) y un segundo arranque (no se repite).
+- [ ] T15. Sin plantilla activa se usa la FCV (P3, P6). Test: una config
+  de antes genera exactamente lo mismo que hoy.
 - [ ] T16. Copiar el Daily, "Enviar al chat" (`team-chat`) y el webhook
   saliente con `renderDailyTemplate` (P13).
 - [ ] T17. El Excel de horas extra con `fillOvertimeTemplate`.
@@ -70,8 +71,7 @@ servidor y los tres clientes en paralelo, cada uno en su repo.
 
 ## Logday Mobile
 
-- [ ] T21. Tabla `templates` en SQLite, sync y migración con
-  `templatesMigrated`.
+- [ ] T21. Tabla `templates` en SQLite y sync.
 - [ ] T22. Copiar y exportar con los motores. El `.xlsx` se elige con el
   selector de documentos.
 - [ ] T23. Pantalla de Plantillas en Ajustes.
@@ -79,9 +79,9 @@ servidor y los tres clientes en paralelo, cada uno en su repo.
 ## Cierre
 
 - [ ] T24. Prueba de punta a punta:
-  - un usuario existente actualiza el servidor y Desktop y sigue con la FCV;
-  - uno nuevo arranca con la de Logday;
-  - un usuario carga una plantilla en Desktop y la ve en Web y Mobile;
-  - "Usar la de Logday" en un equipo llega a los otros.
+  - al actualizar Desktop sin servidor, el Daily y el Excel salen igual que
+    hoy;
+  - elegir la de Logday y cargar una propia en Desktop;
+  - con sync, la plantilla elegida en un equipo llega a Web y a Mobile.
 - [ ] T25. Vault: nota de la feature y decisión "Plantillas por empresa,
   sincronizadas", con los hubs y `Pendientes de Logday.md`.

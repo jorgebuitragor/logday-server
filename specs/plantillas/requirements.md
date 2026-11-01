@@ -18,15 +18,12 @@ Mobile):
 Logday sirve para cualquier empresa, así que estas dos salidas pasan a ser
 **plantillas**:
 
-- Por defecto se usa una **plantilla genérica de Logday**.
-- Cada persona puede cargar la plantilla de su empresa: un texto para el
+- **La plantilla de hoy (FCV) sigue siendo la predeterminada.** Al
+  actualizar no cambia nada para nadie: no hay migración de datos, ni en los
+  clientes ni en el servidor.
+- Se agrega una **plantilla genérica de Logday**, para quien la prefiera.
+- Cada persona puede **cargar la plantilla de su empresa**: un texto para el
   Daily y un `.xlsx` con marcadores para las horas extra.
-- La plantilla de la FCV deja de ser la predeterminada. Quien ya usaba
-  Logday **no la pierde**: al actualizar, la conserva sin hacer nada.
-
-Los compañeros de la FCV usan Logday **sin servidor** (Desktop, y Mobile
-si lo tienen, en modo local), así que conservar su plantilla depende de
-cada cliente, no del servidor: la migración es local (P6–P10).
 
 Una plantilla es un dato de la cuenta, no un gusto del equipo: se
 sincroniza entre los equipos del usuario, a diferencia de las preferencias
@@ -36,8 +33,8 @@ Fuera de alcance (v1):
 
 - Varias plantillas guardadas por tipo. Hay una sola activa por tipo; se
   cambia cargando otra.
-- Plantillas compartidas por empresa o por instancia (que el admin
-  publique la de la FCV para todos). Ver "Pendiente de decisión".
+- Plantillas compartidas por empresa o por instancia. Ver "Pendiente de
+  decisión".
 - Plantillas para otras salidas (exportar Dailys del mes en PDF, notas).
 - Editar el `.xlsx` dentro de Logday: se edita en Excel o LibreOffice y se
   vuelve a cargar.
@@ -52,32 +49,20 @@ Fuera de alcance (v1):
   (genérica) y **FCV** (la de hoy). Se identifican por una clave
   (`logday`, `fcv`), no por su contenido.
 - P3. Cuando un usuario no tiene una plantilla activa de un tipo, el
-  cliente DEBERÁ usar la genérica de Logday.
+  cliente DEBERÁ usar la FCV, que es la de hoy.
 - P4. La plantilla FCV del Excel, aplicada a los mismos datos, DEBERÁ dar
   el mismo libro que genera hoy `generateOvertimeXlsx`: valores, fórmulas,
   estilos, celdas combinadas, anchos y altos. La FCV del Daily DEBERÁ dar el
   mismo texto que `buildDailyCopyText`, carácter por carácter.
-- P5. La FCV NO DEBERÁ ofrecerse como opción a quien no la tiene activa:
-  quien la quiera la carga como archivo, igual que la de cualquier otra
-  empresa. Quien la tiene activa DEBERÁ poder descargarla para pasársela a
-  un compañero.
+- P5. Para cada tipo, el cliente DEBERÁ dejar elegir entre las dos
+  incluidas (FCV y Logday) y una cargada por el usuario.
 
-### Conservar la plantilla FCV al actualizar
+### Actualizar sin cambios
 
-- P6. Cuando un cliente arranca por primera vez con esta función y ya
-  existía una instalación con datos de antes, DEBERÁ activar la plantilla
-  FCV en los dos tipos, salvo que el usuario ya tenga una plantilla activa
-  de ese tipo (por ejemplo, la trajo el sync).
-- P7. Una instalación nueva (la bienvenida de Desktop, el primer inicio de
-  Mobile) NO DEBERÁ activar ninguna: usa la de Logday.
-- P8. El servidor NO DEBERÁ activar plantillas por su cuenta: no hay
-  migración de datos en el servidor. Quien usa sync recibe la FCV desde su
-  equipo, que la activó con P6 y la sube.
-- P9. Si dos equipos del mismo usuario hacen la migración de P6, DEBERÁN
-  escribir lo mismo (la misma clave natural y el mismo contenido), para que
-  no haya duplicados ni conflictos visibles.
-- P10. La migración DEBERÁ correr una sola vez por instalación: si el
-  usuario cambia luego a la de Logday, no DEBERÁ volver a la FCV.
+- P6. Al actualizar a una versión con plantillas, lo que genera Logday NO
+  DEBERÁ cambiar para nadie: sin plantilla activa se usa la FCV (P3), así
+  que no hace falta migrar datos ni en los clientes ni en el servidor.
+- P7–P10. Quitados en la revisión del 1 nov 2026, junto con la migración.
 
 ### Plantilla del Daily (`daily_message`)
 
@@ -120,12 +105,12 @@ Fuera de alcance (v1):
 - P20. Al cargar una plantilla, el cliente DEBERÁ mostrar qué marcadores
   encontró y ofrecer "Descargar un ejemplo" generado con los datos del mes
   actual antes de activarla.
-- P21. El cliente DEBERÁ ofrecer "Descargar la plantilla de Logday" como
-  punto de partida y "Descargar la plantilla actual" (la activa, sea cual
-  sea).
-- P22. "Usar la de Logday" DEBERÁ desactivar la plantilla cargada del tipo.
-  Antes, el cliente DEBERÁ ofrecer descargarla, porque no se guarda otra
-  copia.
+- P21. El cliente DEBERÁ ofrecer descargar cualquiera de las incluidas
+  (FCV o Logday) como punto de partida, y "Descargar la plantilla actual"
+  (la activa, sea cual sea), para pasársela a un compañero.
+- P22. Elegir una plantilla incluida cuando hay una cargada DEBERÁ
+  reemplazar la cargada. Antes, el cliente DEBERÁ ofrecer descargarla,
+  porque no se guarda otra copia.
 
 ### Sync
 
@@ -161,6 +146,11 @@ Fuera de alcance (v1):
   si la FCV llega a usar un servidor propio, que hoy no usa. Propuesta:
   dejarlo para una v2. En v1 se pasa el archivo con "Descargar
   la plantilla actual".
+- **Cambiar la predeterminada a Logday más adelante.** Si Logday llega a
+  usuarios de otras empresas, se puede hacer que solo las instalaciones
+  nuevas arranquen con la de Logday. Necesitaría una migración en cada
+  cliente para que las instalaciones de antes sigan con la FCV. Queda fuera
+  de v1.
 - **Texto de la plantilla genérica del Daily y diseño del Excel genérico.**
   Los propone el agente de diseño (`logday-design`) y los aprueba Jorge
   antes de implementar.
