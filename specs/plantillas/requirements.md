@@ -151,6 +151,3 @@ Fuera de alcance (v1):
   nuevas arranquen con la de Logday. Necesitaría una migración en cada
   cliente para que las instalaciones de antes sigan con la FCV. Queda fuera
   de v1.
-- **Texto de la plantilla genérica del Daily y diseño del Excel genérico.**
-  Propuestos en `design.md` (§2 y §3, "Plantillas incluidas") el 1 nov
-  2026. Falta que Jorge los apruebe.

@@ -218,8 +218,8 @@ entrada (contra zips bomba).
   tres clientes, `generateOvertimeXlsx` se borra.
 - **Logday:** `assets/templates/logday-horas-extra.xlsx`, generado por
   `assets/templates/build_logday_xlsx.py` (openpyxl). El script recibe una
-  carpeta y deja ahí la plantilla y un ejemplo lleno. Diseño propuesto el
-  1 nov 2026, pendiente de la aprobación de Jorge:
+  carpeta y deja ahí la plantilla y un ejemplo lleno. Diseño aprobado por
+  Jorge el 1 nov 2026:
   - **Sin marca de empresa ni logo.** Título "Horas extra — {{mes}}" en
     Calibri 16 negrita; debajo, "Nombre" y "Documento" en etiquetas grises
     con el valor en celdas combinadas B:D.

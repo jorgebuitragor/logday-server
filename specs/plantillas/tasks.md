@@ -15,8 +15,7 @@ servidor y los tres clientes en paralelo, cada uno en su repo.
   plantilla por instancia y el cambio de la predeterminada quedan fuera de
   v1.
 - [x] T3a. Texto genérico del Daily (es y en) y `.xlsx` genérico, en
-  `design.md` y `assets/templates/` (1 nov 2026). Falta la aprobación de
-  Jorge.
+  `design.md` y `assets/templates/`. Aprobados por Jorge el 1 nov 2026.
 - [ ] T3b. `logday-design`: la sección "Plantillas" de Opciones.
 - [ ] T4. Hacer el `.xlsx` FCV con marcadores a partir de la salida de
   `generateOvertimeXlsx`, y elegir la librería de zip (JSZip o fflate) que
