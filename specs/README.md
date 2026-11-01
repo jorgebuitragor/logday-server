@@ -49,4 +49,4 @@ tres archivos:
 | Papelera compartida entre servicios | implementado | [`papelera-compartida/`](./papelera-compartida/requirements.md) |
 | CORS configurable | implementado | [`cors-configurable/`](./cors-configurable/requirements.md) |
 | Cabeceras de seguridad (CSP) | implementado | [`cabeceras-seguridad/`](./cabeceras-seguridad/requirements.md) |
-| Plantillas por empresa (Daily y Excel de horas extra) | en diseño | [`plantillas/`](./plantillas/requirements.md) |
+| Plantillas por empresa (Daily y Excel de horas extra) | en progreso (v1 en los clientes) | [`plantillas/`](./plantillas/requirements.md) |

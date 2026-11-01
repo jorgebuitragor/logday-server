@@ -1,12 +1,34 @@
 # Plantillas por empresa — Requirements
 
-Estado: en diseño.
+Estado: en progreso (v1).
+
+## Alcance de la v1 (decidido por Jorge el 1 nov 2026)
+
+Primero va una versión acotada en los tres clientes, sin servidor:
+
+- **Qué entra.** En Opciones → Plantillas se elige:
+  - para el Daily, entre la de Logday (predeterminada) y una propia, que se
+    edita como texto;
+  - para el Excel, entre Legacy (predeterminada), la de Logday y una propia,
+    que se carga como `.xlsx`.
+- **Sin validaciones** al cargar un `.xlsx` (P18 queda para después). Si
+  el archivo no sirve, el error aparece al exportar.
+- **Sin sync.** La elección y la plantilla propia se guardan solo en el
+  equipo (P23–P26 quedan para después), así que no cambia el servidor ni el
+  contrato.
+- **Lo de siempre no pasa por el motor.** El mensaje de Logday sigue saliendo
+  de `buildDailyCopyText` y el Excel Legacy de `generateOvertimeXlsx`, tal
+  como hoy, así que P4 se cumple sin archivo ni test de equivalencia del
+  Excel. El punto de partida para un `.xlsx` propio es la de Logday.
+- **No se nombra a ninguna empresa** en la app, el código, los textos ni este
+  spec (pedido de Jorge).
+
+Lo demás de este documento describe la versión completa.
 
 ## Contexto
 
-Dos salidas de Logday tienen hoy el formato de la Fundación Cardiovascular
-de Colombia (FCV) fijo en el código de los tres clientes (Desktop, Web y
-Mobile):
+Dos salidas de Logday tienen hoy un formato fijo en el código de los tres
+clientes (Desktop, Web y Mobile), el de la empresa donde nació Logday:
 
 - **El mensaje del Daily** que se copia o se envía al chat ("Buenos días.
   El día…", `buildDailyCopyText` en Desktop y Web, `dailyCopyText.ts` en
@@ -18,16 +40,17 @@ Mobile):
 Logday sirve para cualquier empresa, así que estas dos salidas pasan a ser
 **plantillas**:
 
-- **La plantilla de hoy (FCV) sigue siendo la predeterminada.** Al
-  actualizar no cambia nada para nadie: no hay migración de datos, ni en los
-  clientes ni en el servidor.
-- Se agrega una **plantilla genérica de Logday**, para quien la prefiera.
+- **Lo de siempre sigue siendo lo predeterminado.** El mensaje de siempre
+  pasa a ser la plantilla del Daily **de Logday**, y el Excel de siempre se
+  llama **Legacy**. Al actualizar no cambia nada para nadie: no hay
+  migración de datos, ni en los clientes ni en el servidor.
+- Para el Excel se agrega una **plantilla genérica de Logday**.
 - Cada persona puede **cargar la plantilla de su empresa**: un texto para el
   Daily y un `.xlsx` con marcadores para las horas extra.
 
-Una plantilla es un dato de la cuenta, no un gusto del equipo: se
-sincroniza entre los equipos del usuario, a diferencia de las preferencias
-de UI (`Preferencias de UI siempre locales` en el vault).
+Una plantilla es un dato de la cuenta, no un gusto del equipo: en la
+versión completa se sincroniza entre los equipos del usuario, a diferencia
+de las preferencias de UI (`Preferencias de UI siempre locales` en el vault).
 
 Fuera de alcance (v1):
 
@@ -45,23 +68,28 @@ Fuera de alcance (v1):
 
 - P1. El sistema DEBERÁ manejar dos tipos de plantilla: `daily_message`
   (texto) y `overtime_xlsx` (archivo `.xlsx`).
-- P2. Cada cliente DEBERÁ incluir dos plantillas de cada tipo: **Logday**
-  (genérica) y **FCV** (la de hoy). Se identifican por una clave
-  (`logday`, `fcv`), no por su contenido.
+- P2. Cada cliente DEBERÁ incluir:
+  - para el Daily, la plantilla **Logday** (el mensaje de siempre);
+  - para el Excel, **Legacy** (el de siempre) y **Logday** (genérica).
+
+  Se identifican por una clave (`logday`, `legacy`), no por su contenido.
 - P3. Cuando un usuario no tiene una plantilla activa de un tipo, el
-  cliente DEBERÁ usar la FCV, que es la de hoy.
-- P4. La plantilla FCV del Excel, aplicada a los mismos datos, DEBERÁ dar
-  el mismo libro que genera hoy `generateOvertimeXlsx`: valores, fórmulas,
-  estilos, celdas combinadas, anchos y altos. La FCV del Daily DEBERÁ dar el
-  mismo texto que `buildDailyCopyText`, carácter por carácter.
-- P5. Para cada tipo, el cliente DEBERÁ dejar elegir entre las dos
-  incluidas (FCV y Logday) y una cargada por el usuario.
+  cliente DEBERÁ usar la de siempre: Logday en el Daily y Legacy en el
+  Excel.
+- P4. Lo de siempre DEBERÁ salir idéntico a hoy:
+  - el Excel Legacy, el mismo libro que genera `generateOvertimeXlsx`
+    (valores, fórmulas, estilos, celdas combinadas, anchos y altos);
+  - el Daily de Logday, el mismo texto que `buildDailyCopyText`, carácter
+    por carácter.
+- P5. El cliente DEBERÁ dejar elegir:
+  - en el Daily, entre la de Logday y una propia;
+  - en el Excel, entre Legacy, la de Logday y una cargada por el usuario.
 
 ### Actualizar sin cambios
 
 - P6. Al actualizar a una versión con plantillas, lo que genera Logday NO
-  DEBERÁ cambiar para nadie: sin plantilla activa se usa la FCV (P3), así
-  que no hace falta migrar datos ni en los clientes ni en el servidor.
+  DEBERÁ cambiar para nadie: sin plantilla activa se usa la de siempre (P3),
+  así que no hace falta migrar datos ni en los clientes ni en el servidor.
 - P7–P10. Quitados en la revisión del 1 nov 2026, junto con la migración.
 
 ### Plantilla del Daily (`daily_message`)
@@ -105,9 +133,8 @@ Fuera de alcance (v1):
 - P20. Al cargar una plantilla, el cliente DEBERÁ mostrar qué marcadores
   encontró y ofrecer "Descargar un ejemplo" generado con los datos del mes
   actual antes de activarla.
-- P21. El cliente DEBERÁ ofrecer descargar cualquiera de las incluidas
-  (FCV o Logday) como punto de partida, y "Descargar la plantilla actual"
-  (la activa, sea cual sea), para pasársela a un compañero.
+- P21. El cliente DEBERÁ ofrecer descargar la de Logday como punto de
+  partida, y la cargada, para pasársela a un compañero.
 - P22. Elegir una plantilla incluida cuando hay una cargada DEBERÁ
   reemplazar la cargada. Antes, el cliente DEBERÁ ofrecer descargarla,
   porque no se guarda otra copia.
@@ -143,11 +170,12 @@ Fuera de alcance (v1):
 
 - **Plantilla por instancia.** Que el admin de un servidor publique una
   plantilla que reciben los usuarios nuevos de esa instancia. Solo sirve
-  si la FCV llega a usar un servidor propio, que hoy no usa. Propuesta:
+  si una empresa usa su propio servidor de Logday. Propuesta:
   dejarlo para una v2. En v1 se pasa el archivo con "Descargar
-  la plantilla actual".
-- **Cambiar la predeterminada a Logday más adelante.** Si Logday llega a
-  usuarios de otras empresas, se puede hacer que solo las instalaciones
-  nuevas arranquen con la de Logday. Necesitaría una migración en cada
-  cliente para que las instalaciones de antes sigan con la FCV. Queda fuera
-  de v1.
+  la cargada".
+- **Cambiar el Excel predeterminado a Logday más adelante.** Decidido por
+  Jorge el 1 nov 2026: en esta versión lo predeterminado sigue siendo lo de
+  siempre, Legacy en el Excel y el mensaje de siempre en el Daily. Si Logday
+  llega a usuarios de otras empresas, se puede hacer que solo las
+  instalaciones nuevas arranquen con la de Logday, con una migración en
+  cada cliente para que las de antes sigan con Legacy.
