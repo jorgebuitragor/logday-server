@@ -51,18 +51,12 @@ CREATE INDEX idx_templates_user_id_seq ON templates (user_id, seq);
 - `GET /account/export` incluye `templates` y borrar la cuenta las borra
   (P29). Va en el mismo paquete de dominio: `internal/template/`.
 
-### Migración del servidor (P8)
+### Sin migración de datos en el servidor (P8)
 
-Una migración goose que, para cada usuario existente, inserta
-`(user_id, 'daily_message', 'builtin', 'fcv')` y
-`(user_id, 'overtime_xlsx', 'builtin', 'fcv')`, con `seq` nuevo y
-`updated_at` = el momento de la migración. Usa `INSERT … ON CONFLICT DO
-NOTHING`, así que no pisa nada. El conjunto de usuarios es **PENDIENTE DE
-DECISIÓN** (requirements). La propuesta es todos los usuarios existentes.
-
-El `updated_at` de la migración es anterior a cualquier cambio que el
-usuario haga después en un cliente, así que un "Usar la de Logday"
-posterior siempre le gana (P10).
+La migración del servidor solo crea la tabla. Los usuarios de la FCV no
+usan servidor, así que conservar su plantilla es cosa de cada cliente
+(§4). Quien sí usa sync (Jorge) recibe la FCV porque su Desktop la activa
+y la sube como cualquier otro cambio.
 
 ### Compatibilidad entre versiones
 
@@ -221,15 +215,16 @@ Desktop y en AsyncStorage en Mobile):
   `basePath`; en Mobile, porque la base local ya existía o hay una sesión
   guardada. Después se pone la marca.
   - Con sesión de sync, primero se trae `/sync/changes`, para no escribir
-    encima de lo que puso el servidor (P6). Si el servidor ya la puso, no
+    encima de lo que ya subió otro equipo (P6). Si ya llegó una fila, no
     hay nada que escribir.
 - Si no está y la instalación es nueva (la bienvenida de Desktop, el primer
   inicio de Mobile), solo se pone la marca (P7).
-- Web no tiene instalación: se queda con lo que diga el servidor.
+- Web no tiene instalación: se queda con lo que diga el servidor, que es
+  lo que subieron los otros equipos del usuario.
 
-Como la fila FCV es igual en los dos lados (clave natural, `builtin`, sin
-contenido), si la escriben el servidor y un cliente, el LWW deja una sola
-y con lo mismo (P9).
+Como la fila FCV es igual en todos los equipos (clave natural, `builtin`,
+sin contenido), si dos equipos la escriben, el LWW deja una sola y con lo
+mismo (P9).
 
 ### Interfaz
 

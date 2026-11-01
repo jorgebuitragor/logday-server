@@ -24,6 +24,10 @@ Logday sirve para cualquier empresa, así que estas dos salidas pasan a ser
 - La plantilla de la FCV deja de ser la predeterminada. Quien ya usaba
   Logday **no la pierde**: al actualizar, la conserva sin hacer nada.
 
+Los compañeros de la FCV usan Logday **sin servidor** (Desktop, y Mobile
+si lo tienen, en modo local), así que conservar su plantilla depende de
+cada cliente, no del servidor: la migración es local (P6–P10).
+
 Una plantilla es un dato de la cuenta, no un gusto del equipo: se
 sincroniza entre los equipos del usuario, a diferencia de las preferencias
 de UI (`Preferencias de UI siempre locales` en el vault).
@@ -66,12 +70,12 @@ Fuera de alcance (v1):
   de ese tipo (por ejemplo, la trajo el sync).
 - P7. Una instalación nueva (la bienvenida de Desktop, el primer inicio de
   Mobile) NO DEBERÁ activar ninguna: usa la de Logday.
-- P8. Al aplicar la migración del servidor, el sistema DEBERÁ activar la
-  plantilla FCV en los dos tipos para cada usuario que ya existía, salvo que
-  ya tenga una plantilla activa de ese tipo.
-- P9. La migración de P6 y la de P8 DEBERÁN escribir lo mismo (la misma
-  clave natural y el mismo contenido), para que hacerla en dos lados no
-  cree duplicados ni conflictos visibles.
+- P8. El servidor NO DEBERÁ activar plantillas por su cuenta: no hay
+  migración de datos en el servidor. Quien usa sync recibe la FCV desde su
+  equipo, que la activó con P6 y la sube.
+- P9. Si dos equipos del mismo usuario hacen la migración de P6, DEBERÁN
+  escribir lo mismo (la misma clave natural y el mismo contenido), para que
+  no haya duplicados ni conflictos visibles.
 - P10. La migración DEBERÁ correr una sola vez por instalación: si el
   usuario cambia luego a la de Logday, no DEBERÁ volver a la FCV.
 
@@ -152,14 +156,10 @@ Fuera de alcance (v1):
 
 ## Pendiente de decisión
 
-- **Usuarios a los que la migración del servidor les activa la FCV (P8).**
-  Propuesta: todos los usuarios creados antes de la migración, porque hoy
-  todos son de la FCV. Alternativa: solo los que tienen Dailys u horas
-  extra.
-- **Plantilla por instancia.** Que el admin del servidor publique una
-  plantilla que reciben los usuarios nuevos de esa instancia (el servidor
-  de la FCV daría la FCV a los compañeros nuevos sin pasarse el archivo).
-  Propuesta: dejarlo para una v2. En v1 se pasa el archivo con "Descargar
+- **Plantilla por instancia.** Que el admin de un servidor publique una
+  plantilla que reciben los usuarios nuevos de esa instancia. Solo sirve
+  si la FCV llega a usar un servidor propio, que hoy no usa. Propuesta:
+  dejarlo para una v2. En v1 se pasa el archivo con "Descargar
   la plantilla actual".
 - **Texto de la plantilla genérica del Daily y diseño del Excel genérico.**
   Los propone el agente de diseño (`logday-design`) y los aprueba Jorge

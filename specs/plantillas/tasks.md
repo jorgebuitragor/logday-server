@@ -11,9 +11,8 @@ servidor y los tres clientes en paralelo, cada uno en su repo.
   ignoran un `entity_type` desconocido en `/sync/changes` y en `/ws` (P25).
   Si alguno falla, agregar `?types=` al contrato (design §1,
   "Compatibilidad").
-- [ ] T2. Jorge decide los pendientes de `requirements.md`: a qué usuarios
-  activa la FCV la migración del servidor y si la plantilla por instancia
-  queda para v2.
+- [ ] T2. Jorge decide si la plantilla por instancia queda para v2
+  (`requirements.md`, "Pendiente de decisión").
 - [ ] T3. `logday-design`: el texto de la plantilla genérica del Daily (es y
   en), el `.xlsx` genérico y la sección "Plantillas" de Opciones. Lo
   aprueba Jorge.
@@ -32,9 +31,8 @@ servidor y los tres clientes en paralelo, cada uno en su repo.
   las validaciones de P26 y la exigencia de todos los campos. Tests.
 - [ ] T8. Sumar `template` a `/sync/changes`, `/ws`, `/account/export` y al
   borrado de la cuenta (P29). Tests.
-- [ ] T9. Migración de datos: las filas FCV para los usuarios existentes
-  (P8), con `ON CONFLICT DO NOTHING`. Test con un usuario que ya tiene una
-  fila.
+- [ ] T9. ~~Migración de datos con las filas FCV~~: quitada, porque la
+  FCV no usa servidor (P8). La migración de T6 solo crea la tabla.
 - [ ] T10. `openapi.yaml`: `Template`, `TemplateWrite`, las rutas y el
   `entity_type` nuevo.
 
