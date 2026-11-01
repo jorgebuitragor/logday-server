@@ -7,7 +7,7 @@ Estado: en diseño. Requisitos en `requirements.md` (P1–P29).
 ### Tabla `templates`
 
 Una fila por usuario y tipo: la plantilla **activa**. Si no hay fila, o
-está borrada, se usa la FCV, que es la de hoy (P3). Misma forma que
+está borrada, se usa la de siempre (P3). Misma forma que
 `overtime_month_meta`, con clave natural y sin id del cliente.
 
 ```sql
@@ -15,7 +15,7 @@ CREATE TABLE templates (
     user_id TEXT NOT NULL,
     kind TEXT NOT NULL,          -- 'daily_message' | 'overtime_xlsx'
     source TEXT NOT NULL,        -- 'builtin' | 'custom'
-    builtin_key TEXT,            -- 'logday' | 'fcv' si source = 'builtin'
+    builtin_key TEXT,            -- 'logday' | 'legacy' si source = 'builtin'
     name TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL DEFAULT '', -- texto (daily) o base64 del .xlsx; vacío si builtin
     seq INTEGER NOT NULL,
@@ -53,9 +53,9 @@ CREATE INDEX idx_templates_user_id_seq ON templates (user_id, seq);
 
 ### Sin migración de datos (P6)
 
-La migración del servidor solo crea la tabla. Como la predeterminada sigue
-siendo la FCV, ningún cliente ni el servidor tiene que escribir nada al
-actualizar.
+La migración del servidor solo crea la tabla. Como lo predeterminado sigue
+siendo lo de siempre, ningún cliente ni el servidor tiene que escribir nada
+al actualizar.
 
 ### Compatibilidad entre versiones
 
@@ -94,8 +94,10 @@ Contexto (P12):
 | `hoy.es_hoy` | verdadero si la fecha del Daily es hoy |
 | `usuario.nombre` | el nombre del usuario (o vacío) |
 
-La plantilla FCV queda así, y un test exige que dé exactamente lo de
-`buildDailyCopyText` (P4):
+La plantilla de Logday es el mensaje de siempre, y un test exige que dé
+exactamente lo de `buildDailyCopyText` (P4). Mientras esté elegida, el
+mensaje sigue saliendo de `buildDailyCopyText`; la plantilla escrita sirve
+de punto de partida para una propia:
 
 ```
 Buenos días.
@@ -107,42 +109,10 @@ El día {{anterior.fecha}}:
 {{hoy.actividades}}
 ```
 
-La genérica de Logday sigue el idioma de la app. Es texto plano, sin
-negritas: Slack, Google Chat y Teams marcan las negritas distinto, y en
-texto plano se ve bien en los tres. Las fechas van entre paréntesis porque
-`anterior.fecha` y `hoy.fecha` empiezan con mayúscula ("Viernes 31 de
-Octubre", el formato de la FCV), y a mitad de frase se vería mal.
-
-Español:
-
-```
-Avance del día anterior ({{anterior.fecha}}):
-{{anterior.actividades}}
-
-Plan {{#hoy.es_hoy}}de hoy{{/hoy.es_hoy}}{{^hoy.es_hoy}}del día{{/hoy.es_hoy}} ({{hoy.fecha}}):
-{{hoy.actividades}}
-```
-
-Inglés (con las fechas en inglés: "Friday, October 31"):
-
-```
-Previous workday ({{anterior.fecha}}):
-{{anterior.actividades}}
-
-{{#hoy.es_hoy}}Today{{/hoy.es_hoy}}{{^hoy.es_hoy}}Plan{{/hoy.es_hoy}} ({{hoy.fecha}}):
-{{hoy.actividades}}
-```
-
-Resultado en español, para un lunes:
-
-```
-Avance del día anterior (Viernes 31 de Octubre):
-- Revisé el PR del portal de citas
-- Reunión de planeación
-
-Plan de hoy (Lunes 3 de Noviembre):
-- Desplegar la versión 2.4
-```
+El contexto también tiene las fechas en inglés ("Friday, October 31") para
+las plantillas propias, según el idioma de la app. Una primera versión de
+este spec proponía otra genérica ("Avance del día anterior…"); Jorge la
+descartó el 1 nov 2026: la de Logday es la de siempre.
 
 ## 3. Motor del Excel
 
@@ -210,12 +180,10 @@ entrada (contra zips bomba).
 
 ### Plantillas incluidas
 
-- **FCV:** un `.xlsx` hecho a partir de lo que genera hoy
-  `generateOvertimeXlsx`, con marcadores en lugar de los datos. El test de
-  P4 genera los dos (código viejo y plantilla) para varios meses (sin
-  registros, 1, 31, con festivos) y compara celda por celda con SheetJS:
-  valor, fórmula, estilo, combinadas, anchos y altos. Cuando pase en los
-  tres clientes, `generateOvertimeXlsx` se borra.
+- **Legacy:** el Excel de siempre. En la v1 sigue saliendo de
+  `generateOvertimeXlsx`. Si en la versión completa pasa a ser un `.xlsx`
+  con marcadores, un test de P4 tiene que generar los dos para varios meses
+  (sin registros, 1, 31, con festivos) y compararlos celda por celda.
 - **Logday:** `assets/templates/logday-horas-extra.xlsx`, generado por
   `assets/templates/build_logday_xlsx.py` (openpyxl). El script recibe una
   carpeta y deja ahí la plantilla y un ejemplo lleno. Diseño aprobado por
@@ -223,7 +191,7 @@ entrada (contra zips bomba).
   - **Sin marca de empresa ni logo.** Título "Horas extra — {{mes}}" en
     Calibri 16 negrita; debajo, "Nombre" y "Documento" en etiquetas grises
     con el valor en celdas combinadas B:D.
-  - **Las mismas 11 columnas que la FCV, con nombres cortos.** Fecha,
+  - **Las mismas 11 columnas que Legacy, con nombres cortos.** Fecha,
     Solicitada por, Actividad, Observaciones, Inicio, Fin, Total, Diurnas,
     Nocturnas, Diurnas festivas y Nocturnas festivas. Encima, dos grupos
     combinados: "Horario" (E:G) y "Horas extra" (H:K).
@@ -264,14 +232,15 @@ entrada (contra zips bomba).
 Una sección nueva en Opciones, "Plantillas", en el grupo de datos, con dos
 tarjetas:
 
-- **Mensaje del Daily:** un selector "FCV · Logday · Propia" (P5) y un
-  editor de texto con los marcadores como chips para insertar. Editar una
-  incluida la copia como "Propia", y las incluidas no cambian. Debajo, una
-  vista previa con el Daily de hoy y los avisos (P14).
-- **Excel de horas extra:** el mismo selector, con el nombre y la fecha de
-  carga de la propia, y las acciones "Cargar plantilla (.xlsx)",
-  "Descargar la plantilla actual" y "Descargar la FCV" o "Descargar la de
-  Logday" como punto de partida (P21, P22). Al cargar: la validación
+- **Mensaje del Daily:** un selector "Logday · Propia" (P5). La propia
+  tiene un editor de texto con los marcadores como chips para insertar, y
+  arranca con el mensaje de siempre ("Empezar con la de Logday" lo
+  restablece). Debajo, una vista previa con datos de ejemplo y los avisos
+  (P14).
+- **Excel de horas extra:** un selector "Legacy · Logday · Propia", con el
+  nombre y la fecha de carga de la propia, y las acciones "Cargar plantilla
+  (.xlsx)", "Descargar la cargada" y "Descargar la de Logday" como punto de
+  partida (P21, P22). Al cargar: la validación
   (P18), los marcadores encontrados, los avisos (P19) y "Descargar un
   ejemplo" antes de "Activar" (P20).
 
@@ -280,7 +249,7 @@ antes de implementar.
 
 ## 5. Alternativas descartadas
 
-- **Elegir entre diseños fijos en el código** (Logday, FCV, …): no sirve
+- **Elegir solo entre diseños fijos en el código:** no sirve
   para otras empresas, cuyo formato no conocemos.
 - **Configurar el Excel con un formulario** (título, nombres de columna,
   colores): cubre poco (logos, celdas combinadas y fórmulas propias de
@@ -289,9 +258,8 @@ antes de implementar.
   servidor (local-first).
 - **Plantillas como preferencia local:** se perderían al cambiar de equipo,
   y Web, Desktop y Mobile darían resultados distintos.
-- **Hacer la de Logday la predeterminada, con una migración que deje la
-  FCV a las instalaciones de antes:** era la primera versión de este spec.
-  Jorge la cambió el 1 nov 2026 por algo menos invasivo: la FCV sigue
-  siendo la predeterminada, no se migra nada y la de Logday es una opción
-  más. Si más adelante conviene cambiar la predeterminada, está en
+- **Cambiar lo predeterminado, con una migración que deje lo de siempre a
+  las instalaciones de antes:** era la primera versión de este spec. Jorge
+  la cambió el 1 nov 2026 por algo menos invasivo: lo de siempre sigue
+  siendo lo predeterminado y no se migra nada. Si más adelante conviene cambiar la predeterminada, está en
   "Pendiente de decisión".

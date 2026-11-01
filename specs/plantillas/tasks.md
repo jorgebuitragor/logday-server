@@ -17,13 +17,11 @@ servidor y los tres clientes en paralelo, cada uno en su repo.
 - [ ] T2. Jorge confirma los pendientes de `requirements.md`: que la
   plantilla por instancia y el cambio de la predeterminada quedan fuera de
   v1.
-- [x] T3a. Texto genérico del Daily (es y en) y `.xlsx` genérico, en
-  `design.md` y `assets/templates/`. Aprobados por Jorge el 1 nov 2026.
+- [x] T3a. `.xlsx` genérico en `assets/templates/`, aprobado por Jorge el
+  1 nov 2026. La plantilla del Daily de Logday es el mensaje de siempre.
 - [ ] T3b. `logday-design`: la sección "Plantillas" de Opciones.
-- [ ] T4. Hacer el `.xlsx` FCV con marcadores a partir de la salida de
-  `generateOvertimeXlsx`, y elegir la librería de zip (JSZip o fflate) que
-  sirva en los tres clientes. Guardarlo en `assets/templates/` junto al de
-  Logday y anotar los hashes de los dos en `design.md`.
+- [x] T4. Librería de zip: fflate, que sirve en los tres clientes. Legacy
+  sigue saliendo de `generateOvertimeXlsx` en la v1, sin `.xlsx` propio.
 - [ ] T5. Escribir los casos de prueba compartidos (entradas y salidas
   esperadas del Daily y del Excel) que los tres clientes y Go usan igual,
   en `specs/plantillas/casos/`.
@@ -35,31 +33,30 @@ servidor y los tres clientes en paralelo, cada uno en su repo.
   las validaciones de P26 y la exigencia de todos los campos. Tests.
 - [ ] T8. Sumar `template` a `/sync/changes`, `/ws`, `/account/export` y al
   borrado de la cuenta (P29). Tests.
-- [ ] T9. ~~Migración de datos con las filas FCV~~: quitada. La FCV sigue
-  siendo la predeterminada (P3, P6), así que la migración de T6 solo crea la
-  tabla.
+- [ ] T9. ~~Migración de datos~~: quitada. Lo de siempre sigue siendo lo
+  predeterminado (P3, P6), así que la migración de T6 solo crea la tabla.
 - [ ] T10. `openapi.yaml`: `Template`, `TemplateWrite`, las rutas y el
   `entity_type` nuevo.
 
 ## Motores (cada cliente, mismo comportamiento)
 
 - [ ] T11. `renderDailyTemplate` (design §2) y su test contra los casos de
-  T5. La FCV tiene que dar lo mismo que `buildDailyCopyText` (P4).
+  T5. La de Logday tiene que dar lo mismo que `buildDailyCopyText` (P4).
 - [ ] T12. `fillOvertimeTemplate` y `validateOvertimeTemplate` (design §3)
   con los tests de T5:
   - fórmulas, celdas combinadas y formato condicional corridos;
   - 0, 1 y 31 filas;
   - un valor que empieza con `=`;
   - un zip bomba, y archivos `.xlsm` y con tablas.
-- [ ] T13. Test de equivalencia: la FCV con el motor nuevo contra
-  `generateOvertimeXlsx` (P4). Cuando pase, borrar `generateOvertimeXlsx`.
+- [ ] T13. Si Legacy pasa a ser un `.xlsx` con marcadores (versión
+  completa): test de equivalencia contra `generateOvertimeXlsx` (P4).
 
 ## Logday Desktop (`task-manager`)
 
 - [ ] T14. Store: la plantilla activa por tipo, el archivo en
   `<basePath>/.logday/plantillas/` y el sync de `template`, con la cola
   "pendiente de subir" para el 404 (P24).
-- [ ] T15. Sin plantilla activa se usa la FCV (P3, P6). Test: una config
+- [ ] T15. Sin plantilla activa se usa lo de siempre (P3, P6). Test: una config
   de antes genera exactamente lo mismo que hoy.
 - [ ] T16. Copiar el Daily, "Enviar al chat" (`team-chat`) y el webhook
   saliente con `renderDailyTemplate` (P13).
