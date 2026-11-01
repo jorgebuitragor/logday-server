@@ -107,8 +107,42 @@ El día {{anterior.fecha}}:
 {{hoy.actividades}}
 ```
 
-La genérica de Logday sigue el idioma de la app (es/en). Su texto lo
-propone `logday-design` (pendiente en requirements).
+La genérica de Logday sigue el idioma de la app. Es texto plano, sin
+negritas: Slack, Google Chat y Teams marcan las negritas distinto, y en
+texto plano se ve bien en los tres. Las fechas van entre paréntesis porque
+`anterior.fecha` y `hoy.fecha` empiezan con mayúscula ("Viernes 31 de
+Octubre", el formato de la FCV), y a mitad de frase se vería mal.
+
+Español:
+
+```
+Avance del día anterior ({{anterior.fecha}}):
+{{anterior.actividades}}
+
+Plan {{#hoy.es_hoy}}de hoy{{/hoy.es_hoy}}{{^hoy.es_hoy}}del día{{/hoy.es_hoy}} ({{hoy.fecha}}):
+{{hoy.actividades}}
+```
+
+Inglés (con las fechas en inglés: "Friday, October 31"):
+
+```
+Previous workday ({{anterior.fecha}}):
+{{anterior.actividades}}
+
+{{#hoy.es_hoy}}Today{{/hoy.es_hoy}}{{^hoy.es_hoy}}Plan{{/hoy.es_hoy}} ({{hoy.fecha}}):
+{{hoy.actividades}}
+```
+
+Resultado en español, para un lunes:
+
+```
+Avance del día anterior (Viernes 31 de Octubre):
+- Revisé el PR del portal de citas
+- Reunión de planeación
+
+Plan de hoy (Lunes 3 de Noviembre):
+- Desplegar la versión 2.4
+```
 
 ## 3. Motor del Excel
 
@@ -129,12 +163,13 @@ En cualquier celda de texto (cadena compartida o inline) de cualquier hoja:
 
 | Marcador | Valor | Tipo de celda |
 |---|---|---|
-| `{{mes}}` | "NOVIEMBRE 2026" | texto |
+| `{{mes}}` | "Noviembre 2026" (el `mesLabel` de hoy) | texto |
 | `{{colaborador}}`, `{{cedula}}` | `OvertimeMonthMeta` | texto |
 | `{{total.horas}}`, `{{total.diurnas}}`, `{{total.nocturnas}}`, `{{total.diurnas_festivas}}`, `{{total.nocturnas_festivas}}` | sumas del mes | número |
 
-Fila de datos: una fila cuya primera celda con marcador empieza con
-`{{#fila}}`. Sus celdas usan `{{fila.fecha}}` (número de serie de Excel,
+Fila de datos: la fila que tiene marcadores `{{fila.…}}`. No necesita otra
+marca. Si hay `{{fila.…}}` en más de una fila, la plantilla se rechaza
+(P18). Sus celdas usan `{{fila.fecha}}` (número de serie de Excel,
 como hoy en `parseFecha`), `{{fila.solicitada_por}}`, `{{fila.actividad}}`,
 `{{fila.observaciones}}`, `{{fila.hora_inicio}}` y `{{fila.hora_final}}`
 (fracción de día, como `parseHora`), `{{fila.total}}`, `{{fila.diurnas}}`,
@@ -181,10 +216,31 @@ entrada (contra zips bomba).
   registros, 1, 31, con festivos) y compara celda por celda con SheetJS:
   valor, fórmula, estilo, combinadas, anchos y altos. Cuando pase en los
   tres clientes, `generateOvertimeXlsx` se borra.
-- **Logday:** un `.xlsx` diseñado por `logday-design`: sin marca de empresa
-  ("Horas extra — {{mes}}", "Nombre", "Documento"), con las mismas
-  columnas y la leyenda diurna/nocturna de la ley colombiana como texto
-  editable.
+- **Logday:** `assets/templates/logday-horas-extra.xlsx`, generado por
+  `assets/templates/build_logday_xlsx.py` (openpyxl). El script recibe una
+  carpeta y deja ahí la plantilla y un ejemplo lleno. Diseño propuesto el
+  1 nov 2026, pendiente de la aprobación de Jorge:
+  - **Sin marca de empresa ni logo.** Título "Horas extra — {{mes}}" en
+    Calibri 16 negrita; debajo, "Nombre" y "Documento" en etiquetas grises
+    con el valor en celdas combinadas B:D.
+  - **Las mismas 11 columnas que la FCV, con nombres cortos.** Fecha,
+    Solicitada por, Actividad, Observaciones, Inicio, Fin, Total, Diurnas,
+    Nocturnas, Diurnas festivas y Nocturnas festivas. Encima, dos grupos
+    combinados: "Horario" (E:G) y "Horas extra" (H:K).
+  - **Color.** Índigo de Logday solo en los encabezados (fondo `#EEF2FF`,
+    texto `#312E81`) y en la línea de totales (`#4F46E5`). Bordes finos
+    grises (`#D4D4D8`), sin cuadrícula.
+  - **Fila de datos** en la fila 8. "Total" por fila es la fórmula
+    `SUM(H8:K8)`, para que siga bien si alguien corrige una hora a mano.
+    Formatos: `dd/mm/yyyy`, `h:mm AM/PM` y `0.00;-0.00;"–"`, que muestra el
+    cero como una raya para que se lean solo las horas que hay.
+  - **Totales** con `SUM` sobre la fila de datos (el motor estira el
+    rango). Debajo, una nota pequeña y gris con las franjas diurna,
+    nocturna y festiva y qué va en Observaciones. Es texto normal:
+    cada empresa la cambia en Excel.
+  - **Impresión.** Paneles fijos debajo de los encabezados; horizontal,
+    ajustado al ancho de la página, y los encabezados (filas 6 y 7) se
+    repiten en cada página.
 - Los dos archivos canónicos viven en `logday-server/assets/templates/`
   (con `go:embed` para el render del servidor, si llega) y se copian a cada
   cliente. Un test en cada cliente compara su copia con el hash anotado

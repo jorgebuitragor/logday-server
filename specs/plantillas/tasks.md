@@ -14,13 +14,14 @@ servidor y los tres clientes en paralelo, cada uno en su repo.
 - [ ] T2. Jorge confirma los pendientes de `requirements.md`: que la
   plantilla por instancia y el cambio de la predeterminada quedan fuera de
   v1.
-- [ ] T3. `logday-design`: el texto de la plantilla genérica del Daily (es y
-  en), el `.xlsx` genérico y la sección "Plantillas" de Opciones. Lo
-  aprueba Jorge.
+- [x] T3a. Texto genérico del Daily (es y en) y `.xlsx` genérico, en
+  `design.md` y `assets/templates/` (1 nov 2026). Falta la aprobación de
+  Jorge.
+- [ ] T3b. `logday-design`: la sección "Plantillas" de Opciones.
 - [ ] T4. Hacer el `.xlsx` FCV con marcadores a partir de la salida de
   `generateOvertimeXlsx`, y elegir la librería de zip (JSZip o fflate) que
-  sirva en los tres clientes. Guardar los dos `.xlsx` en
-  `assets/templates/` y anotar sus hashes en `design.md`.
+  sirva en los tres clientes. Guardarlo en `assets/templates/` junto al de
+  Logday y anotar los hashes de los dos en `design.md`.
 - [ ] T5. Escribir los casos de prueba compartidos (entradas y salidas
   esperadas del Daily y del Excel) que los tres clientes y Go usan igual,
   en `specs/plantillas/casos/`.
