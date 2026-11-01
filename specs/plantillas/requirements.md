@@ -1,6 +1,25 @@
 # Plantillas por empresa — Requirements
 
-Estado: en diseño.
+Estado: en progreso (v1).
+
+## Alcance de la v1 (decidido por Jorge el 1 nov 2026)
+
+Primero va una versión acotada en los tres clientes, sin servidor:
+
+- **Qué entra.** En Opciones → Plantillas se elige, para el Daily y para el
+  Excel, entre FCV (la predeterminada), Logday y una propia: el texto del
+  Daily se edita y el `.xlsx` se carga.
+- **Sin validaciones** al cargar un `.xlsx` (P18 queda para después). Si
+  el archivo no sirve, el error aparece al exportar.
+- **Sin sync.** La elección y la plantilla propia se guardan solo en el
+  equipo (P23–P26 quedan para después), así que no cambia el servidor ni el
+  contrato.
+- **La FCV no pasa por el motor.** Sigue saliendo de
+  `generateOvertimeXlsx` y `buildDailyCopyText`, tal como hoy, así que P4 se
+  cumple sin archivo FCV ni test de equivalencia. No hay "Descargar la FCV":
+  el punto de partida para una propia es la de Logday.
+
+Lo demás de este documento describe la versión completa.
 
 ## Contexto
 

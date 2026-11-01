@@ -1,6 +1,9 @@
 # Plantillas por empresa — Tasks
 
-Estado: en diseño. Nada implementado todavía.
+Estado: en progreso. La v1 (ver "Alcance de la v1" en `requirements.md`)
+se hace solo en los clientes: T11, T12 sin validación, T16–T18, T19–T20 sin
+API y T21–T23 con almacenamiento local. El resto queda para la versión
+completa.
 
 Orden: primero lo que fija el contrato y los archivos (T1–T5), después el
 servidor y los tres clientes en paralelo, cada uno en su repo.
