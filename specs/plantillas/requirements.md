@@ -173,8 +173,9 @@ Fuera de alcance (v1):
   si una empresa usa su propio servidor de Logday. Propuesta:
   dejarlo para una v2. En v1 se pasa el archivo con "Descargar
   la cargada".
-- **Cambiar el Excel predeterminado a Logday más adelante.** Si Logday
+- **Cambiar el Excel predeterminado a Logday más adelante.** Decidido por
+  Jorge el 1 nov 2026: en esta versión lo predeterminado sigue siendo lo de
+  siempre, Legacy en el Excel y el mensaje de siempre en el Daily. Si Logday
   llega a usuarios de otras empresas, se puede hacer que solo las
-  instalaciones nuevas arranquen con la de Logday. Necesitaría una
-  migración en cada cliente para que las instalaciones de antes sigan con
-  Legacy. Queda fuera de v1.
+  instalaciones nuevas arranquen con la de Logday, con una migración en
+  cada cliente para que las de antes sigan con Legacy.
