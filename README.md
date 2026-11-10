@@ -4,6 +4,8 @@
 
 API de sync self-hosted para Logday, al estilo Vaultwarden/Bitwarden: se despliega con un único contenedor Docker, y cada cliente se configura para apuntar a su propio host.
 
+Sitio de Logday: **[logday.dev](https://logday.dev)**, con la presentación del proyecto y las descargas de Desktop.
+
 El sync es **opcional**: cualquier cliente de Logday sigue siendo 100% funcional sin conexión a un servidor. Este proyecto existe para quienes eligen sincronizar sus datos entre dispositivos o con su equipo, manteniendo el control total sobre dónde viven esos datos.
 
 ## Clientes
