@@ -24,8 +24,10 @@ COPY . .
 COPY --from=web-builder /web-src/dist ./web/dist
 
 ENV CGO_ENABLED=1
+# Versión informativa que publica GET /version (specs/protocolo-version).
+ARG VERSION=dev
 RUN go build -trimpath \
-    -ldflags '-s -w -linkmode external -extldflags "-static"' \
+    -ldflags "-s -w -linkmode external -extldflags=-static -X github.com/jorgebuitragor/logday-server/internal/compat.ServerVersion=${VERSION}" \
     -o /out/server ./cmd/server
 
 FROM alpine:3.20

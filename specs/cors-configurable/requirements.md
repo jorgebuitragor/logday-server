@@ -45,8 +45,8 @@ de build standalone) es trabajo aparte, no cubierto acá.
 - Cuando llega una request `OPTIONS` de preflight con un `Origin`
   permitido, el sistema DEBERÁ responder directamente `204` con
   `Access-Control-Allow-Origin`, `Access-Control-Allow-Methods`,
-  `Access-Control-Allow-Headers` (incluye `Authorization` y
-  `Content-Type`) y `Access-Control-Max-Age`, sin pasar la request al
+  `Access-Control-Allow-Headers` (incluye `Authorization`,
+  `Content-Type` y `X-Logday-Protocol`, ver `protocolo-version/`) y `Access-Control-Max-Age`, sin pasar la request al
   resto del router.
 - El sistema NO DEBERÁ soportar `*` (wildcard) como origen permitido —
   solo orígenes exactos.
