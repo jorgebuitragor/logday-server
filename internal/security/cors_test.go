@@ -107,3 +107,16 @@ func TestCORSMiddleware_NeverApprovesTheSessionHeaderNorCredentials(t *testing.T
 		t.Fatalf("Access-Control-Allow-Credentials must never be sent, got %q", got)
 	}
 }
+
+func TestCORSMiddleware_PreflightAllowsTheProtocolHeader(t *testing.T) {
+	req := httptest.NewRequest(http.MethodOptions, "/sync/changes", nil)
+	req.Header.Set("Origin", "https://allowed.example")
+	req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	req.Header.Set("Access-Control-Request-Headers", "x-logday-protocol")
+	rec := httptest.NewRecorder()
+	newCORSTestHandler().ServeHTTP(rec, req)
+
+	if allowed := strings.ToLower(rec.Header().Get("Access-Control-Allow-Headers")); !strings.Contains(allowed, "x-logday-protocol") {
+		t.Fatalf("preflight didn't approve X-Logday-Protocol: %q", allowed)
+	}
+}

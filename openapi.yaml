@@ -62,6 +62,29 @@ info:
     — no los asigna el servidor, porque el cliente los necesita para
     funcionar offline-first antes de sincronizar.
 
+    ## Versión de protocolo
+
+    El protocolo de sync es un entero que sube solo cuando cambia algo que
+    un cliente viejo no entendería. Es independiente de la versión del
+    servidor y de la de cada app (ver `specs/protocolo-version`).
+
+    - `GET /version` (sin autenticación) dice qué protocolo habla el
+      servidor y cuál es el mínimo que acepta de un cliente.
+    - Cada cliente manda su protocolo en la cabecera `X-Logday-Protocol`
+      en todos los pedidos a la API. Sin la cabecera, el servidor asume
+      protocolo 1 (las apps anteriores a este contrato).
+    - Si el protocolo del cliente es menor que `min_client_protocol`, la
+      API responde `426` con la cabecera `X-Logday-Min-Protocol`: el
+      cliente debe dejar de sincronizar, conservar sus datos locales y
+      pedir al usuario que actualice la app. Valores que no son un entero
+      positivo dan `400`.
+    - No aplica a `/health`, `/version`, `/ws`, `POST /auth/logout`, el
+      panel de administración ni la web embebida en `/app`.
+    - En el otro sentido, si el servidor habla un protocolo menor que el
+      que necesita el cliente, el cliente avisa que el servidor está
+      desactualizado. Un servidor sin `GET /version` (`404`) habla el
+      protocolo 1.
+
     ## Formato de errores
 
     Los errores **no son JSON**: son `text/plain`, un mensaje corto en el
@@ -135,6 +158,24 @@ paths:
               schema:
                 type: string
                 example: database unavailable
+
+  /version:
+    get:
+      operationId: getVersion
+      tags: [Sistema]
+      summary: Versión del servidor y del protocolo de sync
+      description: |
+        Sin autenticación y sin caché. El cliente lo consulta al conectar y
+        al comprobar la conexión para saber si puede hablar con este
+        servidor. Un servidor sin este endpoint (`404`) habla el protocolo 1.
+      security: []
+      responses:
+        "200":
+          description: Versión y protocolos de la instancia.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VersionResponse"
 
   /auth/login:
     post:
@@ -1267,6 +1308,18 @@ components:
       description: "Access token devuelto por `/auth/login` o `/auth/refresh`, enviado como `Authorization: Bearer <access_token>`."
 
   parameters:
+    ClientProtocol:
+      name: X-Logday-Protocol
+      in: header
+      required: false
+      description: |
+        Protocolo de sync que habla el cliente (entero positivo). Va en todos
+        los pedidos a la API; sin ella, el servidor asume `1`. Ver
+        "Versión de protocolo" arriba.
+      schema:
+        type: integer
+        minimum: 1
+        example: 1
     SessionMode:
       name: X-Logday-Session
       in: header
@@ -1314,6 +1367,22 @@ components:
           schema:
             type: string
             example: admin access required
+    UpgradeRequired:
+      description: |
+        El protocolo del cliente (`X-Logday-Protocol`, o `1` si no la manda)
+        es menor que el mínimo que acepta el servidor. El cliente debe dejar
+        de sincronizar sin borrar sus datos locales y pedir que se actualice
+        la app. Puede llegar en cualquier endpoint de la API.
+      headers:
+        X-Logday-Min-Protocol:
+          description: Protocolo mínimo que exige el servidor.
+          schema:
+            type: integer
+      content:
+        text/plain:
+          schema:
+            type: string
+            example: this app is too old for this server, update it
     NotFound:
       description: El recurso no existe (o ya estaba borrado) para este usuario.
       content:
@@ -1322,6 +1391,24 @@ components:
             type: string
 
   schemas:
+    # --- Sistema ---
+    VersionResponse:
+      type: object
+      required: [server_version, protocol, min_client_protocol]
+      properties:
+        server_version:
+          type: string
+          description: Versión del binario, solo informativa (`dev` si se compiló sin fijarla). No usarla para decidir compatibilidad.
+          example: v1.3.0
+        protocol:
+          type: integer
+          description: Protocolo de sync que habla el servidor.
+          example: 1
+        min_client_protocol:
+          type: integer
+          description: Protocolo más viejo que el servidor acepta de un cliente. Nunca mayor que `protocol`.
+          example: 1
+
     # --- Auth ---
     LoginRequest:
       type: object

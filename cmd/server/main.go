@@ -15,6 +15,7 @@ import (
 	"github.com/jorgebuitragor/logday-server/internal/absence"
 	"github.com/jorgebuitragor/logday-server/internal/auth"
 	"github.com/jorgebuitragor/logday-server/internal/calendar"
+	"github.com/jorgebuitragor/logday-server/internal/compat"
 	"github.com/jorgebuitragor/logday-server/internal/dailyentry"
 	"github.com/jorgebuitragor/logday-server/internal/db"
 	"github.com/jorgebuitragor/logday-server/internal/note"
@@ -102,15 +103,24 @@ func main() {
 		}
 	})
 
-	authHandler.Routes(r)
+	r.Get("/version", compat.VersionHandler)
+
+	// La API de los clientes exige un protocolo mínimo (specs/protocolo-
+	// version). Quedan fuera /health y /version, el panel y la web
+	// embebida (páginas de navegador) y /ws, que solo avisa: un cliente
+	// viejo recibe el 426 en su siguiente pull.
+	r.Group(func(api chi.Router) {
+		api.Use(compat.RequireClientProtocol(compat.MinClientProtocol, "/auth/logout"))
+		authHandler.Routes(api)
+		taskHandler.Routes(api)
+		noteHandler.Routes(api)
+		overtimeHandler.Routes(api)
+		calendarHandler.Routes(api)
+		absenceHandler.Routes(api)
+		dailyEntryHandler.Routes(api)
+		syncHandler.Routes(api)
+	})
 	authHandler.PanelRoutes(r)
-	taskHandler.Routes(r)
-	noteHandler.Routes(r)
-	overtimeHandler.Routes(r)
-	calendarHandler.Routes(r)
-	absenceHandler.Routes(r)
-	dailyEntryHandler.Routes(r)
-	syncHandler.Routes(r)
 	realtimeHandler.Routes(r)
 	logdayweb.Routes(r)
 
