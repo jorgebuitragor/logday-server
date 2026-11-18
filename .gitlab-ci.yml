@@ -78,6 +78,9 @@ build:
     - apk add --no-cache git
     # logday-web is a private sibling repo; the job token can clone it
     # because logday-web allowlists this project (CI/CD > Job token permissions).
+    # The Docker executor keeps /builds in a volume between jobs and only cleans
+    # the project dir, so a clone left by an earlier build is still here.
+    - rm -rf ../logday-web
     - git clone --depth 1 --branch "$WEB_REF"
         "${CI_SERVER_PROTOCOL}://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}:${CI_SERVER_PORT}/root/logday-web.git"
         ../logday-web
