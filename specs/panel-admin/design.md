@@ -300,7 +300,12 @@ encapsular en un constructor.
 /admin/panel/settings/generate-secret` genera un valor con
 `security.GenerateOpaqueToken` (misma primitiva que los refresh tokens
 opacos) y lo muestra una sola vez en un campo de solo lectura con botón de
-copiar — nunca se persiste ni se aplica en runtime. La página se devuelve
+copiar — nunca se persiste ni se aplica en runtime. Ese botón y el del
+modal de resetear contraseña comparten `copyInputValue` (`panel.js`): si el
+navegador rechaza `navigator.clipboard.writeText`, o la API no existe por
+estar fuera de un contexto seguro (HTTP que no sea localhost), el texto
+queda seleccionado y el botón dice "No se pudo copiar: cópialo a mano"
+durante 2 s; si copia, dice "Copiado". La página se devuelve
 como respuesta del propio POST, con `Cache-Control: no-store`: el valor no
 viaja en la URL (antes iba en `?generated_secret=` tras un redirect, y
 quedaba en el historial del navegador y en los logs de acceso). Rotar de verdad la

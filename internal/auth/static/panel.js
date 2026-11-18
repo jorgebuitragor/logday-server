@@ -83,6 +83,35 @@
     });
   }
 
+  // ── Copiar el valor de un <input> ──
+  // writeText es una promesa: el navegador la rechaza si niega el permiso,
+  // y fuera de un contexto seguro (HTTP que no sea localhost) ni siquiera
+  // existe navigator.clipboard. En los dos casos el texto queda
+  // seleccionado para copiarlo a mano, y el botón dice qué pasó.
+  var copyInputValue = function (input, button) {
+    // La etiqueta original se guarda una sola vez: un segundo clic antes
+    // de que vuelva no debe tomar "Copiado" como la original.
+    if (!button.dataset.label) button.dataset.label = button.getAttribute('aria-label');
+    var announce = function (text) {
+      button.setAttribute('aria-label', text);
+      button.title = text;
+      clearTimeout(button.copyTimer);
+      button.copyTimer = setTimeout(function () {
+        button.setAttribute('aria-label', button.dataset.label);
+        button.title = button.dataset.label;
+      }, 2000);
+    };
+    var copyByHand = function () {
+      input.select();
+      announce('No se pudo copiar: cópialo a mano');
+    };
+    if (!navigator.clipboard) {
+      copyByHand();
+      return;
+    }
+    navigator.clipboard.writeText(input.value).then(function () { announce('Copiado'); }, copyByHand);
+  };
+
   // ── Resetear contraseña (users.html) ──
   // Cada fila tiene <button data-reset-user-id data-reset-email>; los
   // valores van en atributos (escapados por html/template) en vez de
@@ -123,7 +152,7 @@
       copyBtn.hidden = false;
     });
     copyBtn.addEventListener('click', function () {
-      navigator.clipboard.writeText(resetInput.value);
+      copyInputValue(resetInput, copyBtn);
     });
   }
 
@@ -133,7 +162,7 @@
   if (secretInput) secretInput.addEventListener('click', function () { secretInput.select(); });
   if (secretInput && copySecretBtn) {
     copySecretBtn.addEventListener('click', function () {
-      navigator.clipboard.writeText(secretInput.value);
+      copyInputValue(secretInput, copySecretBtn);
     });
   }
 })();

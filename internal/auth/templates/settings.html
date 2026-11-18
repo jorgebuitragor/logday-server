@@ -109,10 +109,12 @@
       el contenedor para aplicarlo.
     </p>
     {{if .GeneratedSecret}}
-    <div class="secret-box">
-      <input type="text" readonly value="{{.GeneratedSecret}}" id="generated-secret">
-      <button type="button" class="btn btn-ghost icon-btn" id="copy-secret-btn" aria-label="Copiar">{{template "icon-copy"}}</button>
-    </div>
+    <label>Secreto generado
+      <div class="secret-box">
+        <input type="text" readonly value="{{.GeneratedSecret}}" id="generated-secret">
+        <button type="button" class="btn btn-ghost icon-btn" id="copy-secret-btn" aria-label="Copiar" title="Copiar">{{template "icon-copy"}}</button>
+      </div>
+    </label>
     {{end}}
     <form method="post" action="/admin/panel/settings/generate-secret">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
