@@ -1,0 +1,184 @@
+# Pipeline for the internal GitLab on Hefesto. GitHub stays the source of
+# truth: a cron job on Hefesto mirrors every branch here every 5 minutes.
+#
+# - Every branch: test, lint, build the image, scan it with Trivy.
+# - develop also: SonarQube, push the immutable tag to GHCR, and a MANUAL
+#   deploy to Gaia (production) followed by an automatic verify. Merging to
+#   develop never deploys by itself: someone has to press "deploy".
+#
+# CI variables (Settings > CI/CD > Variables). The secret ones are masked,
+# and all are protected, so only develop/main pipelines can read them:
+#   SONAR_HOST_URL, SONAR_TOKEN   SonarQube on Hefesto (http://10.10.0.3:9000)
+#   GHCR_USER, GHCR_TOKEN         push to ghcr.io (classic PAT, write:packages)
+#   COOLIFY_URL, COOLIFY_TOKEN    Coolify API on Gaia, token with only `deploy`
+#   COOLIFY_APP_UUID              the logday-server application in Coolify
+
+stages: [test, analyze, build, scan, publish, deploy, verify]
+
+# Branch pipelines only. The mirror never opens merge requests, and tags
+# need no pipeline; without this, GitLab warns about duplicate pipelines.
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH
+
+variables:
+  IMAGE: ghcr.io/jorgebuitragor/logday-server
+  WEB_REF: develop
+  # Gaia's private IP: the verify job reaches Traefik over the Hetzner network
+  # instead of the public edge, so Cloudflare Access never gets in the way.
+  GAIA_PRIVATE_IP: 10.10.0.2
+  PUBLIC_HOST: logday.jorgebuitrago.com
+
+default:
+  # Only the hefesto-docker-build runner has this tag. It mounts the host's
+  # docker.sock, which the docker:cli and trivy jobs need.
+  tags: [hefesto-docker]
+
+test:
+  stage: test
+  image: golang:1.25
+  script:
+    - go build ./...
+    - go test -coverprofile=coverage.out ./...
+  artifacts:
+    paths: [coverage.out]
+    expire_in: 1 day
+
+lint:
+  stage: test
+  # Same version as .github/workflows/ci.yml.
+  image: golangci/golangci-lint:v2.12.2
+  script:
+    - golangci-lint run ./...
+
+sonarqube:
+  stage: analyze
+  image: sonarsource/sonar-scanner-cli:12.4
+  needs: [test]
+  # SonarQube Community keeps a single analysis per project, so feature
+  # branches would overwrite develop's. Only develop is analyzed.
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+  variables:
+    # Sonar uses the full history for blame and to tell new code from old.
+    GIT_DEPTH: "0"
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
+  cache:
+    key: sonar
+    paths: [.sonar/cache]
+  script:
+    # qualitygate.wait makes the job fail when the Quality Gate fails,
+    # which stops the pipeline before anything is published or deployed.
+    - sonar-scanner -Dsonar.qualitygate.wait=true
+
+build:
+  stage: build
+  image: docker:29-cli
+  script:
+    - apk add --no-cache git
+    # logday-web is a private sibling repo; the job token can clone it
+    # because logday-web allowlists this project (CI/CD > Job token permissions).
+    - git clone --depth 1 --branch "$WEB_REF"
+        "${CI_SERVER_PROTOCOL}://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}:${CI_SERVER_PORT}/root/logday-web.git"
+        ../logday-web
+    - WEB_SHA=$(git -C ../logday-web rev-parse --short=7 HEAD)
+    - TAG="${CI_COMMIT_REF_SLUG}-$(git rev-parse --short=7 HEAD)-web${WEB_SHA}"
+    # The image lands in the Docker daemon of Hefesto itself (docker.sock),
+    # which is how the trivy and publish jobs find it without a registry.
+    - docker build
+        --build-context logday-web=../logday-web
+        --build-arg VERSION="$TAG"
+        -t "$IMAGE:$TAG" .
+    - echo "TAG=$TAG" > build.env
+  artifacts:
+    reports:
+      # Hands $TAG to every later job.
+      dotenv: build.env
+
+trivy:
+  stage: scan
+  image:
+    name: aquasec/trivy:0.76.2
+    entrypoint: [""]
+  variables:
+    TRIVY_CACHE_DIR: .trivycache
+  cache:
+    key: trivy-db
+    paths: [.trivycache]
+  script:
+    # Report HIGH and CRITICAL, but fail only on critical vulnerabilities
+    # that already have a fix.
+    - trivy image --no-progress --severity HIGH,CRITICAL "$IMAGE:$TAG"
+    - trivy image --no-progress --exit-code 1 --severity CRITICAL --ignore-unfixed "$IMAGE:$TAG"
+
+publish:
+  stage: publish
+  image: docker:29-cli
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+  script:
+    - echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+    # Only the immutable tag. :latest, which Coolify follows, moves in deploy.
+    - docker push "$IMAGE:$TAG"
+  after_script:
+    - docker logout ghcr.io
+
+deploy:
+  stage: deploy
+  image: docker:29-cli
+  # Gaia is production: the job waits for someone to press it. Without
+  # allow_failure: false the pipeline would skip it and carry on to verify.
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+      when: manual
+      allow_failure: false
+  # Each run is recorded under Operate > Environments with its tag, so the
+  # previous deployment there is the rollback target.
+  environment:
+    name: production
+    url: https://logday.jorgebuitrago.com
+  script:
+    - apk add --no-cache curl
+    - echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+    # Point :latest at the tag publish pushed. imagetools rewrites the tag in
+    # the registry without pulling the image.
+    - docker buildx imagetools create -t "$IMAGE:latest" "$IMAGE:$TAG"
+    # Quoted as a whole: an unquoted ": " would make YAML read a mapping.
+    - 'curl --fail-with-body -sS -H "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_URL/api/v1/deploy?uuid=$COOLIFY_APP_UUID"'
+  after_script:
+    - docker logout ghcr.io
+
+verify:
+  stage: verify
+  image: curlimages/curl:8.23.0
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+  script:
+    # Coolify pulls and swaps the container in the background, so poll
+    # /version until the new tag answers (up to ~5 minutes). /version
+    # returns JSON; server_version is the VERSION build arg.
+    - |
+      for i in $(seq 1 30); do
+        running=$(curl -fsS --resolve "$PUBLIC_HOST:443:$GAIA_PRIVATE_IP" "https://$PUBLIC_HOST/version" \
+          | sed -n 's/.*"server_version":"\([^"]*\)".*/\1/p' || true)
+        if [ "$running" = "$TAG" ]; then
+          echo "Gaia is running $TAG"
+          curl -fsS --resolve "$PUBLIC_HOST:443:$GAIA_PRIVATE_IP" "https://$PUBLIC_HOST/health"
+          exit 0
+        fi
+        echo "still running '${running}', waiting for $TAG"
+        sleep 10
+      done
+      echo "Gaia never reported $TAG"
+      exit 1
+
+cleanup:
+  # .post always runs last. Every pipeline builds an image into Hefesto's
+  # own Docker daemon; this removes it so the disk does not fill up. The
+  # pushed tags stay in GHCR.
+  stage: .post
+  image: docker:29-cli
+  rules:
+    - when: always
+  script:
+    - '[ -n "$TAG" ] && docker image rm "$IMAGE:$TAG" || echo "no image to remove"'
