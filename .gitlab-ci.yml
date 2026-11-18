@@ -2,9 +2,10 @@
 # truth: a cron job on Hefesto mirrors every branch here every 5 minutes.
 #
 # - Every branch: test, lint, build the image, scan it with Trivy.
-# - develop also: SonarQube, push the immutable tag to GHCR, and a MANUAL
-#   deploy to Gaia (production) followed by an automatic verify. Merging to
-#   develop never deploys by itself: someone has to press "deploy".
+# - develop also: SonarQube, an automatic deploy to staging on Hefesto, push
+#   the immutable tag to GHCR, and a MANUAL deploy to Gaia (production)
+#   followed by an automatic verify. Merging to develop never deploys to
+#   production by itself: someone has to press "deploy".
 #
 # CI variables (Settings > CI/CD > Variables). The secret ones are masked,
 # and all are protected, so only develop/main pipelines can read them:
@@ -12,8 +13,9 @@
 #   GHCR_USER, GHCR_TOKEN         push to ghcr.io (classic PAT, write:packages)
 #   COOLIFY_URL, COOLIFY_TOKEN    Coolify API on Gaia, token with only `deploy`
 #   COOLIFY_APP_UUID              the logday-server application in Coolify
+#   STAGING_JWT_SECRET            JWT secret of the staging instance (not prod's)
 
-stages: [test, analyze, build, scan, publish, deploy, verify]
+stages: [test, analyze, build, scan, staging, publish, deploy, verify]
 
 # Branch pipelines only. The mirror never opens merge requests, and tags
 # need no pipeline; without this, GitLab warns about duplicate pipelines.
@@ -28,6 +30,8 @@ variables:
   # instead of the public edge, so Cloudflare Access never gets in the way.
   GAIA_PRIVATE_IP: 10.10.0.2
   PUBLIC_HOST: logday.jorgebuitrago.com
+  # Staging runs on Hefesto itself, bound to its private IP (deploy/staging).
+  STAGING_URL: http://10.10.0.3:8081
 
 default:
   # Only the hefesto-docker-build runner has this tag. It mounts the host's
@@ -114,6 +118,30 @@ trivy:
     - trivy image --no-progress --severity HIGH,CRITICAL "$IMAGE:$TAG"
     - trivy image --no-progress --exit-code 1 --severity CRITICAL --ignore-unfixed "$IMAGE:$TAG"
 
+staging:
+  stage: staging
+  image: docker:29-cli
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+  # Recorded under Operate > Environments next to production.
+  environment:
+    name: staging
+    url: http://10.10.0.3:8081
+  script:
+    # Remember which image staging ran before, to remove it once the new
+    # one answers; cleanup only removes its own pipeline's image.
+    - PREV=$(docker inspect -f '{{.Config.Image}}' logday-staging 2>/dev/null || true)
+    # --wait returns once the healthcheck (GET /health) passes, or fails.
+    - docker compose -f deploy/staging/compose.yaml up -d --wait
+    - |
+      running=$(wget -qO- "$STAGING_URL/version" | sed -n 's/.*"server_version":"\([^"]*\)".*/\1/p')
+      if [ "$running" != "$TAG" ]; then
+        echo "staging reports '$running', expected $TAG"
+        exit 1
+      fi
+      echo "staging is running $TAG"
+    - '[ -n "$PREV" ] && [ "$PREV" != "$IMAGE:$TAG" ] && docker image rm "$PREV" || true'
+
 publish:
   stage: publish
   image: docker:29-cli
@@ -180,10 +208,18 @@ verify:
 cleanup:
   # .post always runs last. Every pipeline builds an image into Hefesto's
   # own Docker daemon; this removes it so the disk does not fill up. The
-  # pushed tags stay in GHCR.
+  # pushed tags stay in GHCR. The image staging now runs is kept; the staging
+  # job removes it when the next one replaces it.
   stage: .post
   image: docker:29-cli
   rules:
     - when: always
   script:
-    - '[ -n "$TAG" ] && docker image rm "$IMAGE:$TAG" || echo "no image to remove"'
+    - |
+      if [ -z "$TAG" ]; then
+        echo "no image to remove"
+      elif [ "$(docker inspect -f '{{.Config.Image}}' logday-staging 2>/dev/null)" = "$IMAGE:$TAG" ]; then
+        echo "$IMAGE:$TAG is running in staging, keeping it"
+      else
+        docker image rm "$IMAGE:$TAG"
+      fi

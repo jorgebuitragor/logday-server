@@ -1,0 +1,32 @@
+# Staging instance on Hefesto, started by the `staging` job of .gitlab-ci.yml
+# with the image that pipeline just built (it is already in Hefesto's Docker
+# daemon, so nothing is pulled). Reachable only on Hefesto's private IP:
+#   ssh -L 8081:10.10.0.3:8081 hefesto   # then http://localhost:8081
+#
+# Its data never comes from production: the volume starts empty and the
+# first admin is created from /setup.
+name: logday-staging
+
+services:
+  server:
+    image: ${IMAGE:?}:${TAG:?}
+    container_name: logday-staging
+    restart: unless-stopped
+    environment:
+      DATABASE_PATH: /data/logday.db
+      JWT_SECRET: ${STAGING_JWT_SECRET:?}
+    ports:
+      - "10.10.0.3:8081:8080"
+    volumes:
+      - data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    mem_limit: 512m
+
+volumes:
+  data:
+    name: logday-staging-data
