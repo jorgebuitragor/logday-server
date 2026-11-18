@@ -143,8 +143,10 @@ deploy:
     # Point :latest at the tag publish pushed. imagetools rewrites the tag in
     # the registry without pulling the image.
     - docker buildx imagetools create -t "$IMAGE:latest" "$IMAGE:$TAG"
-    # Quoted as a whole: an unquoted ": " would make YAML read a mapping.
-    - 'curl --fail-with-body -sS -H "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_URL/api/v1/deploy?uuid=$COOLIFY_APP_UUID"'
+    # Coolify only accepts POST here now; a GET answers 405 ("This endpoint
+    # has changed to a POST request"). Quoted as a whole: an unquoted ": "
+    # would make YAML read a mapping.
+    - 'curl --fail-with-body -sS -X POST -H "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_URL/api/v1/deploy?uuid=$COOLIFY_APP_UUID"'
   after_script:
     - docker logout ghcr.io
 
