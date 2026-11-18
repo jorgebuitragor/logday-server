@@ -78,6 +78,10 @@ build:
     - apk add --no-cache git
     # logday-web is a private sibling repo; the job token can clone it
     # because logday-web allowlists this project (CI/CD > Job token permissions).
+    # The runner keeps /builds in a volume shared across jobs and only cleans
+    # this project's own directory, so a previous build's ../logday-web is
+    # still there and git clone would refuse it. Start from scratch.
+    - rm -rf ../logday-web
     - git clone --depth 1 --branch "$WEB_REF"
         "${CI_SERVER_PROTOCOL}://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}:${CI_SERVER_PORT}/root/logday-web.git"
         ../logday-web
