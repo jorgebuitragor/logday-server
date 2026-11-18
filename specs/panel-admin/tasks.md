@@ -231,10 +231,11 @@ confiabilidad, todas en el panel:
 - [x] `settings.html`: el campo del secreto generado no tenía `<label>`.
       Ahora lo envuelve un `<label>Secreto generado</label>`, el mismo
       patrón del modal de resetear contraseña.
-- [ ] Los cinco "Add a `<title>`" en `devices`, `login`, `settings`,
+- [x] Los cinco "Add a `<title>`" en `devices`, `login`, `settings`,
       `setup` y `users` son falsos positivos: el `<title>` vive en el
       partial `head` (`partials.html`) y Sonar analiza cada plantilla
-      por separado. Falta marcarlos como falso positivo en SonarQube.
+      por separado. Marcados como falso positivo en SonarQube, con
+      comentario, el 18 nov 2026.
 - [x] Validación manual en el panel local: label asociado
       (`input.labels`); clic real con el portapapeles negado (aviso y
       texto seleccionado); éxito, rechazo, sin API y doble clic
