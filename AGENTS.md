@@ -5,7 +5,7 @@ Backend en Go de Logday: API de sync, panel de administración y Logday Web embe
 ## Comandos
 
 - `make test` (`go test ./...`), `make lint` (golangci-lint v2), `make build`, `make run`.
-- CI (`.github/workflows/ci.yml`): golangci-lint, `go build ./...` y `go test ./...` con Go 1.25.
+- CI (`.github/workflows/ci.yml`): golangci-lint, `go build ./...`, `go test ./...` y govulncheck con Go 1.27. `go.mod` declara `go 1.25.7` como versión mínima del lenguaje, pero todo se compila con 1.27: el stdlib de 1.25 ya no recibe parches de seguridad.
 - Imagen Docker: necesita `../logday-web` clonado al lado; el build lo compila y lo embebe (`--build-context logday-web=../logday-web`). Es multiplataforma (`linux/amd64` y `linux/arm64`) y compila en cruzado: todos los `RUN` corren en `$BUILDPLATFORM` (Go con CGO vía `tonistiigi/xx`) y la etapa final solo copia, porque Hefesto, el runner de CI, no tiene QEMU. No agregues un `RUN` a la etapa final. Gaia es x86_64: en un Mac, `--platform linux/amd64`.
 
 ## Contrato con los clientes
