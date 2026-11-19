@@ -11,6 +11,7 @@ import (
 	"github.com/jorgebuitragor/logday-server/internal/auth"
 	"github.com/jorgebuitragor/logday-server/internal/db"
 	"github.com/jorgebuitragor/logday-server/internal/httperr"
+	"github.com/jorgebuitragor/logday-server/internal/pathsafe"
 	"github.com/jorgebuitragor/logday-server/internal/realtime"
 )
 
@@ -92,8 +93,15 @@ func decodeProgress(raw json.RawMessage) (*int, error) {
 }
 
 func validateTaskRequest(req taskRequest) error {
-	if req.ID == "" {
-		return errors.New("id is required")
+	// id, project, folder and the dates below become file paths in
+	// Desktop: see internal/pathsafe.
+	if err := pathsafe.Segment("id", req.ID, pathsafe.MaxIDLen); err != nil {
+		return err
+	}
+	if req.Project != "" {
+		if err := pathsafe.Segment("project", req.Project, pathsafe.MaxSegmentLen); err != nil {
+			return err
+		}
 	}
 	if req.Title == "" {
 		return errors.New("title is required")
@@ -178,6 +186,11 @@ func parsePatch(raw map[string]json.RawMessage) (Patch, error) {
 }
 
 func validatePatch(patch Patch) error {
+	if patch.Project.Set && patch.Project.Value != "" {
+		if err := pathsafe.Segment("project", patch.Project.Value, pathsafe.MaxSegmentLen); err != nil {
+			return err
+		}
+	}
 	if patch.Title.Set && patch.Title.Value == "" {
 		return errors.New("title cannot be empty")
 	}

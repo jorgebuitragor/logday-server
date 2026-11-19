@@ -11,6 +11,7 @@ import (
 	"github.com/jorgebuitragor/logday-server/internal/auth"
 	"github.com/jorgebuitragor/logday-server/internal/db"
 	"github.com/jorgebuitragor/logday-server/internal/httperr"
+	"github.com/jorgebuitragor/logday-server/internal/pathsafe"
 	"github.com/jorgebuitragor/logday-server/internal/realtime"
 )
 
@@ -61,8 +62,9 @@ func (req eventRequest) toEvent(userID string) Event {
 }
 
 func validateEventRequest(req eventRequest) error {
-	if req.ID == "" {
-		return errors.New("id is required")
+	// Same id rule as every entity: see internal/pathsafe.
+	if err := pathsafe.Segment("id", req.ID, pathsafe.MaxIDLen); err != nil {
+		return err
 	}
 	if req.Title == "" {
 		return errors.New("title is required")

@@ -40,6 +40,36 @@ si pasa mucho tiempo).
   plano, sin tabla ni entidad propia, reflejando el modelo actual del
   cliente.
 
+### Campos que terminan en rutas (U-06, 19 nov 2026)
+
+Desktop guarda cada registro como archivo y arma la ruta con el `id` de
+la entidad, `Task.project`, `Note.folder` y, para dailys y horas extra,
+el año y el mes cortados con slices fijos de `daily_entries.date` y
+`overtime_entries.fecha` (y de `overtime_month_meta.year_month`).
+
+- Cuando un cliente escriba un `id`, un `Task.project`, una
+  `overtime_entries.fecha` o use `{date}` o `{yearMonth}` en la URL, el
+  sistema DEBERÁ responder `400` si el valor está vacío (salvo
+  `Task.project`, que puede ir vacío), contiene `/` o `\`, es `.` o
+  `..`, tiene caracteres de control, no es UTF-8 válido o supera su
+  largo máximo (128 bytes el `id`, 200 `project`, 64 las fechas).
+- Cuando un cliente escriba `Note.folder`, el sistema DEBERÁ aceptar el
+  valor vacío o segmentos separados por `/`, y DEBERÁ responder `400` si
+  algún segmento está vacío o incumple la regla anterior, o si el total
+  supera 400 bytes.
+- Un parámetro de la URL DEBERÁ cumplir la regla también decodificado
+  (`%2F`, `%5C`).
+- El sistema NO DEBERÁ exigir UUID en `id` ni `YYYY-MM-DD` en las fechas.
+
+Por qué: un valor con separadores que llega por el sync escribía fuera
+de la carpeta de datos en todos los Desktop de la cuenta (U-06 de la
+auditoría de nov 2026). Desktop ya acota sus rutas desde logday#72, pero
+Mobile y los Desktop anteriores dependen del server. No se exige formato
+porque hay `id` legados (los tests usan `task-1`) y fechas legadas en
+colas offline (ver la decisión siguiente): sin `/` ni `\` ninguna puede
+salir de la carpeta de datos con los slices fijos de Desktop. Validado en
+`internal/pathsafe`.
+
 ### Formato de fechas e instantes (decisión del 28 oct 2026)
 
 Campos de instante: `Task.created`, `Task.completed_at`, `Note.created`
@@ -56,7 +86,8 @@ y `Note.updated`. Campos de fecha de calendario: `Task.due`,
 - El sistema DEBERÁ guardar y devolver los campos de instante y de
   fecha de calendario como el mismo string recibido, sin validar su
   formato, normalizarlo, ordenarlo ni compararlo. LWW no mira su
-  contenido.
+  contenido. La única excepción son los caracteres que forman una ruta de
+  archivo (ver "Campos que terminan en rutas").
 - Cuando un cliente lea un campo de instante con un `YYYY-MM-DD`
   legado, el cliente DEBERÁ interpretarlo como esa fecha de calendario
   en su zona local, nunca como medianoche UTC.

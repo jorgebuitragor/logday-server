@@ -62,6 +62,27 @@ info:
     — no los asigna el servidor, porque el cliente los necesita para
     funcionar offline-first antes de sincronizar.
 
+    ## Campos que terminan en rutas de archivo
+
+    Logday Desktop guarda cada registro como archivo y arma la ruta con
+    algunos campos: `projects/<project>/<id>.md`, `notes/<folder>/<id>.md`,
+    y `dailys/` u `overtime/<año>/<mes>/` con el año y el mes cortados de
+    la fecha. Por eso el servidor responde `400` si uno de estos campos
+    puede formar una ruta (`specs/esquema-datos`, "Campos que terminan en
+    rutas"):
+
+    - El `id` de toda entidad, `Task.project`, `overtime_entries.fecha` y
+      los parámetros `{date}` y `{yearMonth}` de la URL: no vacíos, sin `/`
+      ni `\`, distintos de `.` y `..`, sin caracteres de control y en
+      UTF-8 válido. Máximo 128 bytes el `id`, 200 `project` y 64 las
+      fechas. `Task.project` puede ir vacío.
+    - `Note.folder`: vacío (la raíz) o segmentos separados por `/`
+      (subcarpetas), cada uno con la regla anterior; sin `/` al principio,
+      al final ni doble. Máximo 200 bytes por segmento y 400 en total.
+
+    No se valida el formato (UUID, `YYYY-MM-DD`): los valores legados se
+    siguen aceptando.
+
     ## Versión de protocolo
 
     El protocolo de sync es un entero que sube solo cuando cambia algo que
@@ -1569,6 +1590,7 @@ components:
             type: string
         project:
           type: string
+          description: Puede ir vacío. Sin `/` ni `\` (ver "Campos que terminan en rutas de archivo").
         created:
           type: string
           description: |
@@ -1657,6 +1679,7 @@ components:
             type: string
         project:
           type: string
+          description: Puede ir vacío. Sin `/` ni `\` (ver "Campos que terminan en rutas de archivo").
         created:
           type: string
           description: |
@@ -1711,6 +1734,7 @@ components:
           type: string
         folder:
           type: string
+          description: Vacío o subcarpetas separadas por `/`, sin `..` ni `\` (ver "Campos que terminan en rutas de archivo").
         tags:
           type: array
           items:
@@ -1767,6 +1791,7 @@ components:
           type: string
         folder:
           type: string
+          description: Vacío o subcarpetas separadas por `/`, sin `..` ni `\` (ver "Campos que terminan en rutas de archivo").
         tags:
           type: array
           items:
@@ -1814,6 +1839,7 @@ components:
         fecha:
           type: string
           format: date
+          description: Sin `/` ni `\` (ver "Campos que terminan en rutas de archivo"). El formato no se valida.
         solicitada_por:
           type: string
         actividad:
@@ -1862,6 +1888,7 @@ components:
         fecha:
           type: string
           format: date
+          description: Sin `/` ni `\` (ver "Campos que terminan en rutas de archivo"). El formato no se valida.
         solicitada_por:
           type: string
         actividad:
