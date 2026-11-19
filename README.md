@@ -2,94 +2,125 @@
 
 ![local-first](./.github/badge-local-first.svg)
 
-API de sync self-hosted para Logday, al estilo Vaultwarden/Bitwarden: se despliega con un único contenedor Docker, y cada cliente se configura para apuntar a su propio host.
+English · [Español](README.es.md)
 
-Sitio de Logday: **[logday.dev](https://logday.dev)**, con la presentación del proyecto y las descargas de Desktop.
+Self-hosted sync server for [Logday](https://logday.dev/en/), in the spirit of Vaultwarden/Bitwarden: you deploy it as a single Docker container and point each client at your own host.
 
-El sync es **opcional**: cualquier cliente de Logday sigue siendo 100% funcional sin conexión a un servidor. Este proyecto existe para quienes eligen sincronizar sus datos entre dispositivos o con su equipo, manteniendo el control total sobre dónde viven esos datos.
+Sync is **optional**: every Logday client is fully usable without a server. This project is for people who want to sync their data across devices or with their team while keeping full control over where that data lives. There is no hosted Logday.
 
-## Clientes
+## Clients
 
-- [Logday Desktop](https://github.com/jorgebuitragor/logday) (Tauri; macOS, Windows y Linux): local-first, el sync se activa en sus opciones.
-- [Logday Web](https://github.com/jorgebuitragor/logday-web) (React): este servidor la sirve embebida en `/app`. Es el único cliente que necesita el servidor siempre.
-- [Logday Mobile](https://github.com/jorgebuitragor/logday-mobile) (Expo; Android e iOS): local-first, con sync opcional.
+- [Logday Desktop](https://github.com/jorgebuitragor/logday) (Tauri; macOS, Windows and Linux): local-first, sync is turned on in its options.
+- Logday Web (React): this server serves it at `/app`. It's the only client that always needs the server.
+- [Logday Mobile](https://github.com/jorgebuitragor/logday-mobile) (Expo; Android and iOS): local-first, with optional sync. In development.
 
-## Estado del proyecto
+## Status
 
-Implementado y en uso. Las 7 entidades (tareas, notas, dailys, horas extra con su resumen mensual, eventos de calendario y ausencias) se sincronizan con LWW por campo. El texto de notas y dailys usa CRDT (Yjs, vía `ygo`). Hay multi-usuario con aislamiento por cuenta, sync en tiempo real por WebSocket, papelera compartida y política de privacidad con consentimiento. Ver [`specs/`](./specs/README.md) para el detalle de diseño de cada feature.
+Implemented and in daily use. All 7 entities (tasks, notes, dailies, overtime and its monthly summary, calendar events and days off) sync with per-field last-writer-wins. Note and daily text uses a CRDT (Yjs, via `ygo`). It has multi-user support with per-account isolation, real-time sync over WebSocket, a shared trash, and a privacy policy with consent. See [`specs/`](./specs/README.md) for the design of each feature.
 
 ## Stack
 
-- Go (`net/http` + `chi`), un único binario estático.
-- SQLite por defecto (archivo único, cero configuración), con migraciones `goose` embebidas.
-- WebSocket para sync en tiempo real.
-- Panel de administración web embebido en el mismo binario (`html/template`, sin SPA).
-- Docker multi-stage build (~25MB, corre como usuario no-root).
+- Go (`net/http` + `chi`), a single static binary.
+- SQLite by default (one file, zero configuration), with embedded `goose` migrations.
+- WebSocket for real-time sync.
+- Web admin panel embedded in the same binary (`html/template`, no SPA).
+- Multi-stage Docker build (~25 MB, runs as a non-root user).
 
-## Levantar el servidor
+## Quick start with the published image
 
-Requiere Docker y Docker Compose. El build también compila [`logday-web`](https://github.com/jorgebuitragor/logday-web) (repo privado, aparte) y lo embebe, sirviéndolo en `/app`. Como es privado, el build lo toma de un checkout local en vez de clonarlo, así que necesitas tenerlo clonado como hermano de este repo (`../logday-web` relativo a acá).
+The image is on GitHub Container Registry, for `linux/amd64`:
+
+```bash
+docker run -d --name logday -p 8080:8080 \
+  -e JWT_SECRET="$(openssl rand -base64 32)" \
+  -e DATABASE_PATH=/data/logday.db \
+  -v logday-data:/data \
+  ghcr.io/jorgebuitragor/logday-server:latest
+```
+
+Check that it started: `curl http://localhost:8080/health` should answer `ok`. Then open `http://localhost:8080/setup` to create the first admin (see [First boot](#first-boot-two-ways-to-create-the-first-admin)). The web client is at `http://localhost:8080/app`. In production, put it behind HTTPS (see [Reverse proxy and TLS](#reverse-proxy-and-tls)).
+
+Or with Docker Compose:
+
+```yaml
+services:
+  logday:
+    image: ghcr.io/jorgebuitragor/logday-server:latest
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_PATH: /data/logday.db
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in your .env}
+    volumes:
+      - logday-data:/data
+    restart: unless-stopped
+
+volumes:
+  logday-data:
+```
+
+## Building the image
+
+You need Docker and Docker Compose. The build also compiles `logday-web`, the web client, and embeds it to serve it at `/app`. Its source lives in a separate repository that is currently private, so the build takes it from a local checkout next to this repo (`../logday-web`) instead of cloning it.
 
 ```bash
 git clone https://github.com/jorgebuitragor/logday-web.git ../logday-web
 cp .env.example .env
-# edita .env (ver "Variables de entorno" abajo)
+# edit .env (see "Environment variables" below)
 docker compose --env-file .env up -d --build
 ```
 
-Confirma que arrancó: `curl http://localhost:8080/health` debería responder `ok`. El cliente web queda en `http://localhost:8080/app`.
+If you build on an Apple Silicon Mac for an x86_64 server, add `--platform linux/amd64`; otherwise the image comes out for ARM.
 
-Si construyes la imagen en un Mac con Apple Silicon para un servidor x86_64, agrega `--platform linux/amd64`: si no, la imagen sale para ARM.
+### Environment variables
 
-### Variables de entorno
-
-| Variable | Requerida | Descripción |
+| Variable | Required | Description |
 |---|---|---|
-| `JWT_SECRET` | Sí | Firma los access tokens (JWT). Genera una con `openssl rand -base64 32`. |
-| `ADMIN_EMAIL` | No | Email del primer admin, creado en el primer arranque. Ver "Primer arranque" abajo; es la alternativa a `/setup`. |
-| `ADMIN_PASSWORD` | No | Contraseña del primer admin. Va junto con `ADMIN_EMAIL`: si falta una de las dos, no se usa ninguna. |
-| `DATABASE_PATH` | No | Ruta del archivo SQLite. Por defecto `./data/logday.db`; `docker-compose.yml` la fija en `/data/logday.db`, y el volumen `logday-data` persiste ese directorio. |
-| `PORT` | No | Puerto HTTP interno del binario. Por defecto `8080`. |
-| `CORS_ALLOWED_ORIGINS` | No | Orígenes exactos, separados por comas, que pueden llamar a la API desde otro dominio (por ejemplo, un Logday Web desplegado aparte). Vacía, CORS queda apagado. No acepta comodines. |
-| `COOKIE_SECURE` | No | `always` marca siempre como `Secure` la cookie de sesión de Logday Web. Úsala si tu cadena de proxies no reenvía bien `X-Forwarded-Proto` (por ejemplo, un CDN con TLS "flexible"). |
+| `JWT_SECRET` | Yes | Signs access tokens (JWT). Generate one with `openssl rand -base64 32`. |
+| `ADMIN_EMAIL` | No | Email of the first admin, created on first boot. See "First boot" below; it's the alternative to `/setup`. |
+| `ADMIN_PASSWORD` | No | Password of the first admin. Goes together with `ADMIN_EMAIL`: if one is missing, neither is used. |
+| `DATABASE_PATH` | No | Path of the SQLite file. Defaults to `./data/logday.db`; `docker-compose.yml` sets it to `/data/logday.db`, and the `logday-data` volume persists that directory. |
+| `PORT` | No | Internal HTTP port of the binary. Defaults to `8080`. |
+| `CORS_ALLOWED_ORIGINS` | No | Exact origins, comma-separated, allowed to call the API from another domain (for example, a Logday Web deployed separately). Empty means CORS is off. No wildcards. |
+| `COOKIE_SECURE` | No | `always` always marks Logday Web's session cookie as `Secure`. Use it if your proxy chain doesn't forward `X-Forwarded-Proto` correctly (for example, a CDN with "flexible" TLS). |
 
-### Primer arranque: dos formas de crear el primer admin
+### First boot: two ways to create the first admin
 
-**Opción A: variables de entorno** (sin interacción, ideal para despliegues automatizados). Define `ADMIN_EMAIL`/`ADMIN_PASSWORD` en `.env` antes del primer `docker compose up`. El servidor crea ese usuario como admin la primera vez que arranca con la base de datos vacía. En arranques posteriores estas variables se ignoran, porque ya existe al menos un usuario.
+**Option A: environment variables** (non-interactive, good for automated deployments). Set `ADMIN_EMAIL`/`ADMIN_PASSWORD` before the first start. The server creates that user as admin the first time it boots with an empty database. On later boots these variables are ignored, because at least one user already exists.
 
-**Opción B: `/setup` desde el navegador**. Si no defines esas variables, el servidor arranca igual (no falla) y sirve un formulario en `http://<tu-host>:8080/setup` para crear ahí el primer admin. Una vez creado, esa pantalla queda bloqueada: no se puede volver a usar para crear un segundo "primer admin".
+**Option B: `/setup` in the browser.** If you don't set those variables, the server still starts (it doesn't fail) and serves a form at `http://<your-host>:8080/setup` to create the first admin there. Once created, that page is locked: it can't be used again to create a second "first admin".
 
-Cualquiera de las dos formas te deja con una cuenta admin que puede iniciar sesión en `http://<tu-host>:8080/admin/panel/login`.
+Either way you end up with an admin account that can sign in at `http://<your-host>:8080/admin/panel/login`.
 
-## API para clientes
+## Client API
 
-El contrato completo de la API de sync (auth, CRUD por recurso, feed de `/sync/changes` y el protocolo de `/ws`) está documentado en [`openapi.yaml`](./openapi.yaml) (OpenAPI 3.0.3). Ábrelo en [Swagger Editor](https://editor.swagger.io) o en cualquier visor de OpenAPI para navegarlo.
+The full sync API contract (auth, CRUD per resource, the `/sync/changes` feed and the `/ws` protocol) is documented in [`openapi.yaml`](./openapi.yaml) (OpenAPI 3.0.3). Open it in [Swagger Editor](https://editor.swagger.io) or any OpenAPI viewer to browse it.
 
-## Panel de administración
+## Admin panel
 
-Una vez que existe al menos un admin, `http://<tu-host>:8080/admin/panel` permite, sin tocar la API a mano:
+Once at least one admin exists, `http://<your-host>:8080/admin/panel` lets you, without touching the API by hand:
 
-- Ver todos los usuarios de la instancia (activos y dados de baja).
-- Crear usuarios nuevos y promoverlos o degradarlos a admin.
-- Dar de baja (reversible) o restaurar un usuario.
-- Resetear la contraseña de otro usuario. Lo hace un admin, así que no requiere SMTP; todavía no hay recuperación self-service.
-- Ver y revocar los dispositivos y sesiones de **cualquier** usuario de la instancia, no solo los propios.
+- See every user of the instance (active and deactivated).
+- Create users and promote them to admin or demote them.
+- Deactivate (reversibly) or restore a user.
+- Reset another user's password. An admin does it, so it needs no SMTP; there's no self-service recovery yet.
+- See and revoke the devices and sessions of **any** user of the instance, not just your own.
 
-Ver [`specs/panel-admin/`](./specs/panel-admin/requirements.md) para el detalle de diseño: por qué la sesión del panel es una cookie propia y no reusa el modelo de tokens de los clientes de sync, el CSRF, etc.
+See [`specs/panel-admin/`](./specs/panel-admin/requirements.md) for the design details: why the panel session is its own cookie instead of reusing the sync clients' token model, CSRF, and so on.
 
-**Recomendación para producción**: el panel (`/admin/panel/*`) es la única parte del servidor pensada para que una persona la use desde el navegador. La API de sync (`/auth`, `/tasks`, `/sync/changes`, `/ws`, etc.) la consumen los clientes de Logday y no puede quedar detrás de un login interactivo. Si tu proxy o CDN soporta reglas de acceso por path (por ejemplo Cloudflare Access, un `forward_auth` de Traefik, o `auth_request` de nginx con un proveedor SSO), agrega esa capa **solo sobre `/admin/panel/*`** como segundo factor delante del login propio del panel. Deja el resto del dominio sin esa capa, para no romper a los clientes de sync. Es la misma seguridad en profundidad que se recomienda para cualquier dashboard administrativo self-hosted (Coolify, Vaultwarden, etc.): la autenticación de la app más la del borde, en dos capas independientes.
+**Production recommendation:** the panel (`/admin/panel/*`) is the only part of the server meant to be used by a person in a browser. The sync API (`/auth`, `/tasks`, `/sync/changes`, `/ws`, etc.) is used by Logday clients and can't sit behind an interactive login. If your proxy or CDN supports per-path access rules (for example Cloudflare Access, Traefik's `forward_auth`, or nginx's `auth_request` with an SSO provider), add that layer **only on `/admin/panel/*`** as a second factor in front of the panel's own login. Leave the rest of the domain without it, so sync clients keep working. It's the same defense in depth recommended for any self-hosted admin dashboard (Coolify, Vaultwarden, etc.): the app's authentication plus the edge's, as two independent layers.
 
-## Reverse proxy y TLS
+## Reverse proxy and TLS
 
-El servidor sirve HTTP plano a propósito: no maneja certificados ni termina TLS él mismo, igual que Vaultwarden. Para exponerlo con HTTPS, pon un reverse proxy delante (Caddy, nginx, Traefik, el que ya uses). Ejemplo mínimo con Caddy, que maneja Let's Encrypt automáticamente:
+The server speaks plain HTTP on purpose: it doesn't manage certificates or terminate TLS itself, just like Vaultwarden. To expose it over HTTPS, put a reverse proxy in front (Caddy, nginx, Traefik, whatever you already use). A minimal example with Caddy, which handles Let's Encrypt automatically:
 
 ```caddyfile
-logday.tudominio.com {
+logday.yourdomain.com {
     reverse_proxy localhost:8080
 }
 ```
 
-O con nginx, asumiendo que la terminación TLS ya está resuelta en el bloque `server` de arriba:
+Or with nginx, assuming TLS termination is already set up in the surrounding `server` block:
 
 ```nginx
 location / {
@@ -100,16 +131,16 @@ location / {
 }
 ```
 
-Las cookies se comportan distinto según cuál sea:
+The cookies behave differently:
 
-- **La sesión de Logday Web** se marca `Secure` cuando el proxy avisa con `X-Forwarded-Proto: https`. Por eso conviene reenviar esa cabecera, o usar `COOKIE_SECURE=always`.
-- **La cookie del panel** solo se marca `Secure` si la conexión con el contenedor es TLS. Lo normal es que el proxy termine TLS y le hable por HTTP interno, y en ese caso la cookie no lleva `Secure`. Para que eso no debilite la seguridad real, el tráfico entre el proxy y el contenedor tiene que quedar dentro de una red que el proxy controle (la red interna de Docker, o `localhost`), no expuesto directamente a internet sin pasar por el proxy.
+- **Logday Web's session** is marked `Secure` when the proxy sends `X-Forwarded-Proto: https`. That's why you should forward that header, or use `COOKIE_SECURE=always`.
+- **The panel cookie** is only marked `Secure` if the connection to the container is TLS. Usually the proxy terminates TLS and talks to the container over internal HTTP, and then the cookie has no `Secure` flag. So that this doesn't weaken real security, the traffic between the proxy and the container must stay inside a network the proxy controls (Docker's internal network, or `localhost`), not exposed directly to the internet without going through the proxy.
 
-El servidor también manda sus propias cabeceras de seguridad, incluida una CSP estricta para `/app` y el panel (ver [`specs/cabeceras-seguridad/`](./specs/cabeceras-seguridad/requirements.md)).
+The server also sends its own security headers, including a strict CSP for `/app` and the panel (see [`specs/cabeceras-seguridad/`](./specs/cabeceras-seguridad/requirements.md)).
 
-## Desarrollo
+## Development
 
-Requiere Go (la versión está en `go.mod`) y un compilador de C, porque el driver de SQLite usa CGO.
+You need Go (the version is in `go.mod`) and a C compiler, because the SQLite driver uses CGO.
 
 ```bash
 make build   # go build -o bin/server ./cmd/server
@@ -119,15 +150,17 @@ make lint    # golangci-lint run ./...
 make fmt     # golangci-lint fmt ./...
 ```
 
-`make run` necesita `JWT_SECRET` en el entorno.
+`make run` needs `JWT_SECRET` in the environment.
 
-## Documentación
+## Documentation
 
-- [`specs/`](./specs/README.md): una carpeta por feature con requisitos, diseño y tareas (Spec-Driven Development). [`specs/esquema-datos/`](./specs/esquema-datos/requirements.md) es la fuente de verdad del modelo de datos que comparten los clientes.
-- [`specs/convenciones-codigo/`](./specs/convenciones-codigo/requirements.md): estructura de paquetes y convenciones de código.
-- [`AGENTS.md`](./AGENTS.md): comandos, contrato con los clientes y lo que no se hace sin preguntar. Sirve para personas y para agentes de IA.
-- [`CONTRIBUTING.md`](./CONTRIBUTING.md): flujo de ramas (Gitflow).
+The specs, the project docs and the code comments are written in Spanish.
 
-## Licencia
+- [`specs/`](./specs/README.md): one folder per feature with requirements, design and tasks (Spec-Driven Development). [`specs/esquema-datos/`](./specs/esquema-datos/requirements.md) is the source of truth for the data model shared by the clients.
+- [`specs/convenciones-codigo/`](./specs/convenciones-codigo/requirements.md): package structure and code conventions.
+- [`AGENTS.md`](./AGENTS.md): commands, the contract with the clients, and what isn't done without asking. Written for people and for AI agents.
+- [`CONTRIBUTING.md`](./CONTRIBUTING.md): branching flow (Gitflow).
 
-[AGPL-3.0-or-later](./LICENSE). Software libre: cualquier persona u organización puede desplegar su propia instancia. Si ofreces una versión modificada como servicio a terceros, el AGPL exige publicar también ese código modificado (copyleft de red).
+## License
+
+[AGPL-3.0-or-later](./LICENSE). Free software: anyone, person or organization, can run their own instance. If you offer a modified version as a service to others, the AGPL requires you to publish that modified code too (network copyleft).
