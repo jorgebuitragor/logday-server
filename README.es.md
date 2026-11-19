@@ -30,7 +30,7 @@ Implementado y en uso. Las 7 entidades (tareas, notas, dailys, horas extra con s
 
 ## Inicio rápido con la imagen publicada
 
-La imagen está en GitHub Container Registry, para `linux/amd64`:
+La imagen está en GitHub Container Registry, para `linux/amd64` y `linux/arm64` (Raspberry Pi 4/5 con sistema de 64 bits, VPS ARM, Apple Silicon):
 
 ```bash
 docker run -d --name logday -p 8080:8080 \
@@ -55,7 +55,7 @@ docker compose --env-file .env up -d --build
 
 Confirma que arrancó: `curl http://localhost:8080/health` debería responder `ok`. El cliente web queda en `http://localhost:8080/app`.
 
-Si construyes la imagen en un Mac con Apple Silicon para un servidor x86_64, agrega `--platform linux/amd64`: si no, la imagen sale para ARM.
+Por defecto la imagen se construye para tu propia máquina. Para otra arquitectura, pasa `--platform` (por ejemplo `--platform linux/amd64` en un Mac con Apple Silicon para un servidor x86_64, o `--platform linux/amd64,linux/arm64` para las dos). El Dockerfile compila en cruzado, así que no hace falta emulación.
 
 ### Variables de entorno
 

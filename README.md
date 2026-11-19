@@ -28,7 +28,7 @@ Implemented and in daily use. All 7 entities (tasks, notes, dailies, overtime an
 
 ## Quick start with the published image
 
-The image is on GitHub Container Registry, for `linux/amd64`:
+The image is on GitHub Container Registry, for `linux/amd64` and `linux/arm64` (Raspberry Pi 4/5 with a 64-bit OS, ARM VPS, Apple Silicon):
 
 ```bash
 docker run -d --name logday -p 8080:8080 \
@@ -70,7 +70,7 @@ cp .env.example .env
 docker compose --env-file .env up -d --build
 ```
 
-If you build on an Apple Silicon Mac for an x86_64 server, add `--platform linux/amd64`; otherwise the image comes out for ARM.
+By default the image is built for your own machine. To build it for another architecture, pass `--platform` (for example `--platform linux/amd64` on an Apple Silicon Mac for an x86_64 server, or `--platform linux/amd64,linux/arm64` for both). The Dockerfile cross-compiles, so this needs no emulation.
 
 ### Environment variables
 
