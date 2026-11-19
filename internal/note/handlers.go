@@ -12,6 +12,7 @@ import (
 	"github.com/jorgebuitragor/logday-server/internal/auth"
 	"github.com/jorgebuitragor/logday-server/internal/db"
 	"github.com/jorgebuitragor/logday-server/internal/httperr"
+	"github.com/jorgebuitragor/logday-server/internal/pathsafe"
 	"github.com/jorgebuitragor/logday-server/internal/realtime"
 )
 
@@ -68,8 +69,13 @@ func (req noteRequest) toNote(userID string) Note {
 }
 
 func validateNoteRequest(req noteRequest) error {
-	if req.ID == "" {
-		return errors.New("id is required")
+	// id, project, folder and the dates below become file paths in
+	// Desktop: see internal/pathsafe.
+	if err := pathsafe.Segment("id", req.ID, pathsafe.MaxIDLen); err != nil {
+		return err
+	}
+	if err := pathsafe.Folder(req.Folder); err != nil {
+		return err
 	}
 	if req.Title == "" {
 		return errors.New("title is required")
@@ -126,6 +132,11 @@ func parseNotePatch(raw map[string]json.RawMessage) (Patch, error) {
 }
 
 func validateNotePatch(patch Patch) error {
+	if patch.Folder.Set {
+		if err := pathsafe.Folder(patch.Folder.Value); err != nil {
+			return err
+		}
+	}
 	if patch.Title.Set && patch.Title.Value == "" {
 		return errors.New("title cannot be empty")
 	}

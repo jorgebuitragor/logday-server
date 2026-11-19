@@ -40,7 +40,7 @@ default:
 
 test:
   stage: test
-  image: golang:1.25
+  image: golang:1.27
   script:
     - go build ./...
     - go test -coverprofile=coverage.out ./...
@@ -51,7 +51,7 @@ test:
 lint:
   stage: test
   # Same version as .github/workflows/ci.yml.
-  image: golangci/golangci-lint:v2.12.2
+  image: golangci/golangci-lint:v2.15.0
   script:
     - golangci-lint run ./...
 

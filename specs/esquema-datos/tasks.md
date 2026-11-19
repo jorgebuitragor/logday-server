@@ -70,3 +70,10 @@ validadas end-to-end.
       `internal/task/progress_test.go`,
       `TestChangesSinceCarriesTaskProgress` (`internal/sync`) y
       `TestExportAndDeleteUserAccount` (`internal/auth`).
+- [x] Campos que terminan en rutas (U-06, 19 nov 2026): `internal/pathsafe`
+      valida `id` de las 5 entidades con `POST`, `Task.project`,
+      `Note.folder`, `overtime_entries.fecha` y los parámetros `{date}` y
+      `{yearMonth}`, en `POST` y `PATCH`. Tests en
+      `internal/pathsafe/pathsafe_test.go` y `pathsafe_test.go` de `note`,
+      `task`, `overtime` y `dailyentry`; los de `note` fallan con el
+      handler anterior.

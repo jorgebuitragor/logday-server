@@ -11,6 +11,7 @@ import (
 	"github.com/jorgebuitragor/logday-server/internal/auth"
 	"github.com/jorgebuitragor/logday-server/internal/db"
 	"github.com/jorgebuitragor/logday-server/internal/httperr"
+	"github.com/jorgebuitragor/logday-server/internal/pathsafe"
 	"github.com/jorgebuitragor/logday-server/internal/realtime"
 )
 
@@ -73,11 +74,13 @@ func (req entryRequest) toEntry(userID string) Entry {
 }
 
 func validateEntryRequest(req entryRequest) error {
-	if req.ID == "" {
-		return errors.New("id is required")
+	// id, project, folder and the dates below become file paths in
+	// Desktop: see internal/pathsafe.
+	if err := pathsafe.Segment("id", req.ID, pathsafe.MaxIDLen); err != nil {
+		return err
 	}
-	if req.Fecha == "" {
-		return errors.New("fecha is required")
+	if err := pathsafe.Segment("fecha", req.Fecha, pathsafe.MaxDateLen); err != nil {
+		return err
 	}
 	if req.UpdatedAt.IsZero() {
 		return errors.New("updated_at is required")
@@ -108,6 +111,11 @@ func parseEntryPatch(raw map[string]json.RawMessage) (EntryPatch, error) {
 	var err error
 	if patch.Fecha, err = db.PatchField[string](raw, "fecha"); err != nil {
 		return EntryPatch{}, err
+	}
+	if patch.Fecha.Set {
+		if err := pathsafe.Segment("fecha", patch.Fecha.Value, pathsafe.MaxDateLen); err != nil {
+			return EntryPatch{}, err
+		}
 	}
 	if patch.SolicitadaPor, err = db.PatchField[string](raw, "solicitada_por"); err != nil {
 		return EntryPatch{}, err
@@ -238,6 +246,11 @@ func (h *Handler) listEntries(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) patchMonthMeta(w http.ResponseWriter, r *http.Request) {
 	userID, _ := auth.UserIDFromContext(r.Context())
 	yearMonth := chi.URLParam(r, "yearMonth")
+	// Desktop writes the month under overtime/<year>/<month>/.
+	if err := pathsafe.URLParam("yearMonth", yearMonth, pathsafe.MaxDateLen); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	raw, err := db.ParsePatch(r.Body)
 	if err != nil {

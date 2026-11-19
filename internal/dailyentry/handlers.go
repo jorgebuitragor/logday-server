@@ -11,6 +11,7 @@ import (
 
 	"github.com/jorgebuitragor/logday-server/internal/auth"
 	"github.com/jorgebuitragor/logday-server/internal/httperr"
+	"github.com/jorgebuitragor/logday-server/internal/pathsafe"
 	"github.com/jorgebuitragor/logday-server/internal/realtime"
 )
 
@@ -50,6 +51,12 @@ type entryRequest struct {
 func (h *Handler) put(w http.ResponseWriter, r *http.Request) {
 	userID, _ := auth.UserIDFromContext(r.Context())
 	date := chi.URLParam(r, "date")
+	// Desktop writes the day under dailys/<year>/<month>/, cut from date
+	// with fixed slices: see internal/pathsafe.
+	if err := pathsafe.URLParam("date", date, pathsafe.MaxDateLen); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	var req entryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

@@ -21,7 +21,7 @@ RUN npm run build
 # xx provides cross-compilation wrappers (xx-apk, xx-go, xx-verify).
 FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.6.1 AS xx
 
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine3.24 AS builder
 
 COPY --from=xx / /
 # clang + lld cross-compile the C side of go-sqlite3 for any target.
@@ -51,12 +51,12 @@ RUN xx-go build -trimpath \
 # The non-root user and the data directory, prepared on the build host so
 # the final stage needs no RUN. Same Alpine tag as the final stage, so its
 # /etc/passwd and /etc/group are the final image's own plus the logday user.
-FROM --platform=$BUILDPLATFORM alpine:3.20 AS rootfs
+FROM --platform=$BUILDPLATFORM alpine:3.24 AS rootfs
 RUN adduser -D -u 10001 logday && \
     mkdir -p /data && \
     chown logday:logday /data
 
-FROM alpine:3.20
+FROM alpine:3.24
 
 COPY --from=rootfs /etc/passwd /etc/group /etc/
 COPY --from=rootfs --chown=10001:10001 /data /data
