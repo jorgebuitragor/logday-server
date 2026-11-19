@@ -73,7 +73,7 @@ func TestFolder(t *testing.T) {
 }
 
 func TestURLParam(t *testing.T) {
-	for _, v := range []string{"..%2F..", "a%5Cb", "%2E%2E", "a%00b", "%zz"} {
+	for _, v := range []string{"a/b", "..", "..%2F..", "a%5Cb", "%2E%2E", "a%00b", "%zz"} {
 		if err := URLParam("date", v, MaxDateLen); err == nil {
 			t.Errorf("URLParam(%q): expected an error", v)
 		}
