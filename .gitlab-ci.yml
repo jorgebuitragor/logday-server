@@ -92,7 +92,11 @@ build:
     - TAG="${CI_COMMIT_REF_SLUG}-$(git rev-parse --short=7 HEAD)-web${WEB_SHA}"
     # The image lands in the Docker daemon of Hefesto itself (docker.sock),
     # which is how the trivy and publish jobs find it without a registry.
+    # Hefesto's daemon uses the containerd image store, so one tag holds both
+    # platforms (an index); staging runs the amd64 one and publish pushes
+    # both. The Dockerfile cross-compiles arm64, since Hefesto has no QEMU.
     - docker build
+        --platform linux/amd64,linux/arm64
         --build-context logday-web=../logday-web
         --build-arg VERSION="$TAG"
         -t "$IMAGE:$TAG" .
@@ -114,9 +118,15 @@ trivy:
     paths: [.trivycache]
   script:
     # Report HIGH and CRITICAL, but fail only on critical vulnerabilities
-    # that already have a fix.
-    - trivy image --no-progress --severity HIGH,CRITICAL "$IMAGE:$TAG"
-    - trivy image --no-progress --exit-code 1 --severity CRITICAL --ignore-unfixed "$IMAGE:$TAG"
+    # that already have a fix. Each platform is scanned on its own: their
+    # packages come from different Alpine builds. --image-src docker keeps
+    # trivy on Hefesto's daemon instead of falling back to a registry.
+    - |
+      for platform in linux/amd64 linux/arm64; do
+        echo "--- $platform"
+        trivy image --no-progress --image-src docker --platform "$platform" --severity HIGH,CRITICAL "$IMAGE:$TAG"
+        trivy image --no-progress --image-src docker --platform "$platform" --exit-code 1 --severity CRITICAL --ignore-unfixed "$IMAGE:$TAG"
+      done
 
 staging:
   stage: staging
@@ -149,7 +159,8 @@ publish:
     - if: $CI_COMMIT_BRANCH == "develop"
   script:
     - echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-    # Only the immutable tag. :latest, which Coolify follows, moves in deploy.
+    # Only the immutable tag, with both platforms. :latest, which Coolify
+    # follows, moves in deploy.
     - docker push "$IMAGE:$TAG"
   after_script:
     - docker logout ghcr.io
@@ -172,7 +183,7 @@ deploy:
     - apk add --no-cache curl
     - echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
     # Point :latest at the tag publish pushed. imagetools rewrites the tag in
-    # the registry without pulling the image.
+    # the registry without pulling the image, and keeps both platforms.
     - docker buildx imagetools create -t "$IMAGE:latest" "$IMAGE:$TAG"
     # Coolify only accepts POST here now; a GET answers 405 ("This endpoint
     # has changed to a POST request"). Quoted as a whole: an unquoted ": "
