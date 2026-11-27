@@ -220,6 +220,9 @@ func (h *Handler) setupSubmit(w http.ResponseWriter, r *http.Request) {
 	case len(password) < cfg.MinPasswordLength:
 		renderSetupError(fmt.Sprintf("la contraseña debe tener al menos %d caracteres", cfg.MinPasswordLength))
 		return
+	case len(password) > security.MaxPasswordLength:
+		renderSetupError(fmt.Sprintf("la contraseña puede tener como máximo %d bytes", security.MaxPasswordLength))
+		return
 	case password != confirm:
 		renderSetupError("las contraseñas no coinciden")
 		return
@@ -280,8 +283,9 @@ func (h *Handler) panelLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		renderTemplate(w, h.tmpl, status, "login.html", formPageData{CSRFToken: csrf, Error: msg, Email: email, InstanceName: h.instanceName(r.Context())})
 	}
 
-	limitKey := clientIP(r) + ":" + strings.ToLower(email)
-	if !h.limiter.Allow(limitKey) {
+	ip := clientIP(r)
+	if wait := h.limiter.Check(ip, email); wait > 0 {
+		setRetryAfter(w, wait)
 		renderLoginError(http.StatusTooManyRequests, "demasiados intentos, inténtalo de nuevo más tarde")
 		return
 	}
@@ -289,8 +293,13 @@ func (h *Handler) panelLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	// Same generic message for "no existe", "password incorrecto" y "no
 	// es admin" — no filtrar cuál de los tres pasó.
 	fail := func() {
-		h.limiter.RecordFailure(limitKey)
+		h.limiter.RecordFailure(ip, email)
 		renderLoginError(http.StatusUnauthorized, "credenciales inválidas")
+	}
+
+	if len(password) > security.MaxPasswordLength {
+		fail()
+		return
 	}
 
 	u, err := h.store.getUserByEmail(r.Context(), email)
@@ -307,7 +316,7 @@ func (h *Handler) panelLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		fail()
 		return
 	}
-	h.limiter.Reset(limitKey)
+	h.limiter.Reset(ip, email)
 
 	cfg, err := settings.Get(r.Context(), h.store.db)
 	if err != nil {
@@ -376,6 +385,9 @@ func (h *Handler) panelCreateUser(w http.ResponseWriter, r *http.Request) {
 	case email == "" || len(password) < cfg.MinPasswordLength:
 		h.redirectWithModalError(w, r, "/admin/panel", "create-user-modal", email,
 			fmt.Sprintf("email y contraseña (mínimo %d caracteres) son obligatorios", cfg.MinPasswordLength))
+		return
+	case len(password) > security.MaxPasswordLength:
+		h.redirectWithModalError(w, r, "/admin/panel", "create-user-modal", email, fmt.Sprintf("la contraseña puede tener como máximo %d bytes", security.MaxPasswordLength))
 		return
 	case !validEmail(email):
 		h.redirectWithModalError(w, r, "/admin/panel", "create-user-modal", email, "ese email no es válido")
@@ -501,6 +513,10 @@ func (h *Handler) panelResetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(password) < cfg.MinPasswordLength {
 		h.redirectWithError(w, r, "/admin/panel", fmt.Sprintf("la contraseña debe tener al menos %d caracteres", cfg.MinPasswordLength))
+		return
+	}
+	if len(password) > security.MaxPasswordLength {
+		h.redirectWithError(w, r, "/admin/panel", fmt.Sprintf("la contraseña puede tener como máximo %d bytes", security.MaxPasswordLength))
 		return
 	}
 

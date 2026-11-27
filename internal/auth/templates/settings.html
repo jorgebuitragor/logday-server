@@ -37,7 +37,7 @@
       <label>Ventana del límite (segundos)
         <input type="text" inputmode="numeric" pattern="[0-9]*" name="login_rate_limit_window_seconds" required value="{{.Settings.LoginRateLimitWindowSeconds}}">
       </label>
-      <p class="hint">Aplica tanto al login del panel como al de la API de sync. Cambia en caliente, sin reiniciar.</p>
+      <p class="hint">Fallos permitidos por IP y email dentro de la ventana. Una IP admite cuatro veces más con cualquier email, y una cuenta que los supera desde varias IP espera cada vez más, hasta 5 minutos. Aplica tanto al login del panel como al de la API de sync. Cambia en caliente, sin reiniciar.</p>
     </div>
 
     <h3>Cuentas</h3>

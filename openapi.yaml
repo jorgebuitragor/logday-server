@@ -83,6 +83,21 @@ info:
     No se valida el formato (UUID, `YYYY-MM-DD`): los valores legados se
     siguen aceptando.
 
+    ## Límites
+
+    Ver `specs/limites-auth`.
+
+    - Tamaño del cuerpo: 64 KiB en `/auth/*`, 1 MiB en el panel y 16 MiB
+      en el resto (configurable con `MAX_BODY_MB`). Si `Content-Length` lo
+      supera, la respuesta es `413`; si el cuerpo viene sin largo y se
+      pasa, `400`.
+    - Contraseñas de hasta 1024 bytes.
+    - Login: un `429` trae `Retry-After` en segundos. Cuenta los intentos
+      fallidos por IP y email, por IP (cuatro veces el límite, con
+      cualquier email) y por cuenta (desde cualquier IP, con una espera
+      que se duplica hasta 5 minutos). El cliente debe esperar lo que dice
+      `Retry-After` antes de reintentar.
+
     ## Versión de protocolo
 
     El protocolo de sync es un entero que sube solo cuando cambia algo que
@@ -230,7 +245,7 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
-          description: Credenciales inválidas.
+          description: Credenciales inválidas. También si la contraseña supera 1024 bytes.
           content:
             text/plain:
               schema:
@@ -243,8 +258,20 @@ paths:
               schema:
                 type: string
                 example: device limit reached, revoke a device first
+        "413":
+          description: El cuerpo supera 64 KiB.
         "429":
-          description: Demasiados intentos de login fallidos para este email/IP. Reintentar más tarde.
+          description: |
+            Demasiados intentos fallidos: para este email desde esta IP, desde
+            esta IP con cualquier email, o para esta cuenta desde cualquier IP.
+            Llega aunque la contraseña sea correcta. Reintentar después de
+            `Retry-After`.
+          headers:
+            Retry-After:
+              description: Segundos que hay que esperar antes de reintentar.
+              schema:
+                type: integer
+                minimum: 1
           content:
             text/plain:
               schema:
@@ -497,7 +524,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/User"
         "400":
-          description: Body inválido, email/password faltante o inválido, password bajo el mínimo configurado, o dominio de email no permitido.
+          description: Body inválido, email/password faltante o inválido, password bajo el mínimo configurado o de más de 1024 bytes, o dominio de email no permitido.
           content:
             text/plain:
               schema:
@@ -1441,6 +1468,7 @@ components:
         password:
           type: string
           format: password
+          description: Hasta 1024 bytes (no caracteres).
         device_name:
           type: string
           description: "Nombre legible del dispositivo, mostrado en `GET /devices` y el panel de admin. Por defecto `\"unknown device\"` si se omite."

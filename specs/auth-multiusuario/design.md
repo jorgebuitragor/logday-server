@@ -80,6 +80,10 @@ en múltiples réplicas, este limiter dejaría de ser efectivo (cada
 réplica cuenta por separado) y habría que moverlo a un store
 compartido.
 
+Desde nov 2026 (U-10) el limiter también cuenta por IP y por cuenta, con
+una espera exponencial por cuenta, y la IP es la del cliente real detrás
+de un proxy de confianza: ver [`limites-auth/`](../limites-auth/design.md).
+
 ## Explícitamente pendiente
 
 - Recuperación de password (diferido a v2, requiere decidir SMTP).

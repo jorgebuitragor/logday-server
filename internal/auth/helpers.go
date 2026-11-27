@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"net/mail"
+	"strconv"
+	"time"
 )
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -40,10 +42,19 @@ func validEmail(email string) bool {
 	return err == nil
 }
 
+// clientIP is the caller's address. Behind a reverse proxy,
+// security.ClientIPMiddleware has already replaced r.RemoteAddr with the
+// real client IP (TRUSTED_PROXIES, specs/limites-auth).
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// setRetryAfter sets Retry-After to wait, rounded up to whole seconds.
+func setRetryAfter(w http.ResponseWriter, wait time.Duration) {
+	secs := int64((wait + time.Second - 1) / time.Second)
+	w.Header().Set("Retry-After", strconv.FormatInt(max(secs, 1), 10))
 }

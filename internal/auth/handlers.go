@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -99,26 +98,35 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limitKey := clientIP(r) + ":" + strings.ToLower(req.Email)
-	if !h.limiter.Allow(limitKey) {
+	ip := clientIP(r)
+	if wait := h.limiter.Check(ip, req.Email); wait > 0 {
+		setRetryAfter(w, wait)
 		http.Error(w, "too many attempts, try again later", http.StatusTooManyRequests)
+		return
+	}
+
+	fail := func() {
+		h.limiter.RecordFailure(ip, req.Email)
+		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+	}
+
+	if len(req.Password) > security.MaxPasswordLength {
+		fail()
 		return
 	}
 
 	u, err := h.store.getUserByEmail(r.Context(), req.Email)
 	if err != nil {
-		h.limiter.RecordFailure(limitKey)
-		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		fail()
 		return
 	}
 
 	match, err := security.VerifyPassword(req.Password, u.PasswordHash)
 	if err != nil || !match {
-		h.limiter.RecordFailure(limitKey)
-		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		fail()
 		return
 	}
-	h.limiter.Reset(limitKey)
+	h.limiter.Reset(ip, req.Email)
 
 	cfg, err := settings.Get(r.Context(), h.store.db)
 	if err != nil {
@@ -484,6 +492,10 @@ func (h *Handler) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.Password) < cfg.MinPasswordLength {
 		http.Error(w, fmt.Sprintf("password must be at least %d characters", cfg.MinPasswordLength), http.StatusBadRequest)
+		return
+	}
+	if len(req.Password) > security.MaxPasswordLength {
+		http.Error(w, fmt.Sprintf("password must be at most %d bytes", security.MaxPasswordLength), http.StatusBadRequest)
 		return
 	}
 	if !cfg.EmailDomainAllowed(req.Email) {

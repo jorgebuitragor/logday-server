@@ -14,6 +14,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/jorgebuitragor/logday-server/internal/auth"
 	"github.com/jorgebuitragor/logday-server/internal/db"
@@ -30,6 +31,14 @@ func (h *Hub) hasClient(userID string) bool {
 }
 
 func setupServer(t *testing.T) (*httptest.Server, *Hub) {
+	t.Helper()
+	return setupServerWithTimeout(t, 0)
+}
+
+// setupServerWithTimeout gives the server ReadTimeout and WriteTimeout
+// of timeout (none if zero) and chi's Logger, which wraps the
+// ResponseWriter like in cmd/server.
+func setupServerWithTimeout(t *testing.T, timeout time.Duration) (*httptest.Server, *Hub) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	database, err := db.Open(dbPath)
@@ -54,10 +63,16 @@ func setupServer(t *testing.T) (*httptest.Server, *Hub) {
 	realtimeHandler := NewHandler(hub, authHandler)
 
 	r := chi.NewRouter()
+	if timeout > 0 {
+		r.Use(middleware.Logger)
+	}
 	authHandler.Routes(r)
 	realtimeHandler.Routes(r)
 
-	srv := httptest.NewServer(r)
+	srv := httptest.NewUnstartedServer(r)
+	srv.Config.ReadTimeout = timeout
+	srv.Config.WriteTimeout = timeout
+	srv.Start()
 	t.Cleanup(srv.Close)
 	return srv, hub
 }
@@ -111,6 +126,20 @@ func wsURL(srv *httptest.Server) string {
 
 func TestServeWSDeliversNotify(t *testing.T) {
 	srv, hub := setupServer(t)
+	assertDelivers(t, srv, hub, 0)
+}
+
+// The server's timeouts (cmd/server) must not cut an open socket: the
+// notice arrives after both have passed. net/http clears the deadlines
+// when the upgrade hijacks the connection; this guards that.
+func TestServeWSOutlivesServerTimeouts(t *testing.T) {
+	const timeout = 300 * time.Millisecond
+	srv, hub := setupServerWithTimeout(t, timeout)
+	assertDelivers(t, srv, hub, 3*timeout)
+}
+
+func assertDelivers(t *testing.T, srv *httptest.Server, hub *Hub, idle time.Duration) {
+	t.Helper()
 	token := login(t, srv)
 	userID := userIDFromToken(t, token)
 
@@ -135,6 +164,7 @@ func TestServeWSDeliversNotify(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
+	time.Sleep(idle)
 	hub.Notify(userID, "task", "task-1", 42)
 
 	var got notice
