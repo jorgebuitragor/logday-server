@@ -83,6 +83,9 @@ By default the image is built for your own machine. To build it for another arch
 | `PORT` | No | Internal HTTP port of the binary. Defaults to `8080`. |
 | `CORS_ALLOWED_ORIGINS` | No | Exact origins, comma-separated, allowed to call the API from another domain (for example, a Logday Web deployed separately). Empty means CORS is off. No wildcards. |
 | `COOKIE_SECURE` | No | `always` always marks Logday Web's session cookie as `Secure`. Use it if your proxy chain doesn't forward `X-Forwarded-Proto` correctly (for example, a CDN with "flexible" TLS). |
+| `TRUSTED_PROXIES` | No | IPs or CIDRs of your reverse proxies, comma-separated. Only requests coming from them can say who the real client is (`X-Forwarded-For`, or `CLIENT_IP_HEADER`). Empty, the server uses the connection's IP: behind a proxy, every client then shares one login rate limit. See "Reverse proxy and TLS". |
+| `CLIENT_IP_HEADER` | No | Header with the client IP, read only from `TRUSTED_PROXIES`. Empty means `X-Forwarded-For`. Behind Cloudflare, if your proxy doesn't trust Cloudflare's addresses, use `CF-Connecting-IP`. |
+| `MAX_BODY_MB` | No | Body limit for authenticated requests (notes, sync), in MB. Default 16. `/auth/*` is capped at 64 KiB and the panel at 1 MiB. |
 
 ### First boot: two ways to create the first admin
 
@@ -135,6 +138,8 @@ The cookies behave differently:
 
 - **Logday Web's session** is marked `Secure` when the proxy sends `X-Forwarded-Proto: https`. That's why you should forward that header, or use `COOKIE_SECURE=always`.
 - **The panel cookie** is only marked `Secure` if the connection to the container is TLS. Usually the proxy terminates TLS and talks to the container over internal HTTP, and then the cookie has no `Secure` flag. So that this doesn't weaken real security, the traffic between the proxy and the container must stay inside a network the proxy controls (Docker's internal network, or `localhost`), not exposed directly to the internet without going through the proxy.
+
+**The client's real IP.** Behind a proxy, every request reaches the server from the proxy's address. The login rate limit counts failed attempts per IP, so until you set `TRUSTED_PROXIES` all clients share one counter, and anyone could slow down everyone's logins. Set it to the proxy's address (`127.0.0.1` if it runs on the same host) or to its Docker network (`docker network inspect <network>`). The server then reads `X-Forwarded-For`, which Caddy, nginx (with the line above) and Traefik send. If Cloudflare sits in front of your proxy and the proxy doesn't trust Cloudflare's addresses, the real IP only arrives in `CF-Connecting-IP`: set `CLIENT_IP_HEADER=CF-Connecting-IP`, and make sure the proxy can only be reached through Cloudflare. The panel's device list shows the IP the server sees, which is a quick way to check the setting.
 
 The server also sends its own security headers, including a strict CSP for `/app` and the panel (see [`specs/cabeceras-seguridad/`](./specs/cabeceras-seguridad/requirements.md)).
 

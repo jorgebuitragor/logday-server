@@ -51,3 +51,4 @@ tres archivos:
 | Cabeceras de seguridad (CSP) | implementado | [`cabeceras-seguridad/`](./cabeceras-seguridad/requirements.md) |
 | Plantillas por empresa (Daily y Excel de horas extra) | en progreso (v1 en los clientes) | [`plantillas/`](./plantillas/requirements.md) |
 | Versión de protocolo (cliente mínimo) | en progreso (servidor listo) | [`protocolo-version/`](./protocolo-version/requirements.md) |
+| Límites del server y del login (U-10) | implementado | [`limites-auth/`](./limites-auth/requirements.md) |

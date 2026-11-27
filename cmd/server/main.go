@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -82,12 +84,24 @@ func main() {
 	syncStore := sync.NewStore(database)
 	syncHandler := sync.NewHandler(syncStore, authHandler)
 
+	clientIPConfig, err := security.ParseClientIPConfig(os.Getenv("TRUSTED_PROXIES"), os.Getenv("CLIENT_IP_HEADER"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	bodyLimit, err := parseBodyLimit(os.Getenv("MAX_BODY_MB"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	go runTombstonePurge(database)
 
 	r := chi.NewRouter()
+	// Before the logger, so the access log shows the real client IP.
+	r.Use(security.ClientIPMiddleware(clientIPConfig))
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(security.HeadersMiddleware)
+	r.Use(security.BodyLimitMiddleware(bodyLimit))
 	if corsOrigins := parseCORSOrigins(os.Getenv("CORS_ALLOWED_ORIGINS")); len(corsOrigins) > 0 {
 		r.Use(security.CORSMiddleware(corsOrigins))
 	}
@@ -124,15 +138,27 @@ func main() {
 	realtimeHandler.Routes(r)
 	logdayweb.Routes(r)
 
-	server := &http.Server{
-		Addr:              addr,
-		Handler:           r,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
+	server := newHTTPServer(addr, r)
 
 	log.Printf("listening on %s", addr)
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
+	}
+}
+
+// newHTTPServer sets the timeouts of specs/limites-auth: a client that
+// opens connections and sends nothing, or reads the response byte by
+// byte, can't hold them forever. They don't cut /ws: net/http clears a
+// connection's deadlines when the WebSocket upgrade hijacks it
+// (TestServeWSOutlivesServerTimeouts in internal/realtime).
+func newHTTPServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       time.Minute,
+		WriteTimeout:      2 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
 	}
 }
 
@@ -141,6 +167,20 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// parseBodyLimit reads MAX_BODY_MB, the body limit for authenticated
+// requests (notes, sync). Empty means security.DefaultBodyLimitBytes.
+func parseBodyLimit(raw string) (int64, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return security.DefaultBodyLimitBytes, nil
+	}
+	mb, err := strconv.Atoi(raw)
+	if err != nil || mb < 1 || mb > 1024 {
+		return 0, fmt.Errorf("MAX_BODY_MB must be a whole number of megabytes between 1 and 1024, got %q", raw)
+	}
+	return int64(mb) << 20, nil
 }
 
 // parseCORSOrigins splits a comma-separated CORS_ALLOWED_ORIGINS value

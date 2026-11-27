@@ -68,6 +68,9 @@ Por defecto la imagen se construye para tu propia máquina. Para otra arquitectu
 | `PORT` | No | Puerto HTTP interno del binario. Por defecto `8080`. |
 | `CORS_ALLOWED_ORIGINS` | No | Orígenes exactos, separados por comas, que pueden llamar a la API desde otro dominio (por ejemplo, un Logday Web desplegado aparte). Vacía, CORS queda apagado. No acepta comodines. |
 | `COOKIE_SECURE` | No | `always` marca siempre como `Secure` la cookie de sesión de Logday Web. Úsala si tu cadena de proxies no reenvía bien `X-Forwarded-Proto` (por ejemplo, un CDN con TLS "flexible"). |
+| `TRUSTED_PROXIES` | No | IPs o CIDR de tus reverse proxies, separados por comas. Solo las peticiones que vienen de ellos pueden decir cuál es el cliente real (`X-Forwarded-For`, o `CLIENT_IP_HEADER`). Vacía, el servidor usa la IP de la conexión: detrás de un proxy, todos los clientes comparten entonces un mismo límite de intentos de login. Ver "Reverse proxy y TLS". |
+| `CLIENT_IP_HEADER` | No | Cabecera con la IP del cliente, que solo se lee de `TRUSTED_PROXIES`. Vacía es `X-Forwarded-For`. Detrás de Cloudflare, si tu proxy no confía en las direcciones de Cloudflare, usa `CF-Connecting-IP`. |
+| `MAX_BODY_MB` | No | Límite del cuerpo de las peticiones con sesión (notas, sync), en MB. Por defecto 16. `/auth/*` acepta hasta 64 KiB y el panel 1 MiB. |
 
 ### Primer arranque: dos formas de crear el primer admin
 
@@ -120,6 +123,8 @@ Las cookies se comportan distinto según cuál sea:
 
 - **La sesión de Logday Web** se marca `Secure` cuando el proxy avisa con `X-Forwarded-Proto: https`. Por eso conviene reenviar esa cabecera, o usar `COOKIE_SECURE=always`.
 - **La cookie del panel** solo se marca `Secure` si la conexión con el contenedor es TLS. Lo normal es que el proxy termine TLS y le hable por HTTP interno, y en ese caso la cookie no lleva `Secure`. Para que eso no debilite la seguridad real, el tráfico entre el proxy y el contenedor tiene que quedar dentro de una red que el proxy controle (la red interna de Docker, o `localhost`), no expuesto directamente a internet sin pasar por el proxy.
+
+**La IP real del cliente.** Detrás de un proxy, todas las peticiones le llegan al servidor desde la dirección del proxy. El límite de intentos de login cuenta los fallos por IP, así que mientras no configures `TRUSTED_PROXIES` todos los clientes comparten un mismo contador, y cualquiera podría frenar el login de todos. Ponle la dirección del proxy (`127.0.0.1` si corre en el mismo host) o su red de Docker (`docker network inspect <red>`). El servidor lee entonces `X-Forwarded-For`, que mandan Caddy, nginx (con la línea de arriba) y Traefik. Si Cloudflare va delante de tu proxy y el proxy no confía en las direcciones de Cloudflare, la IP real solo llega en `CF-Connecting-IP`: usa `CLIENT_IP_HEADER=CF-Connecting-IP`, y asegúrate de que al proxy solo se pueda llegar a través de Cloudflare. La lista de dispositivos del panel muestra la IP que ve el servidor, y sirve para comprobar la configuración.
 
 El servidor también manda sus propias cabeceras de seguridad, incluida una CSP estricta para `/app` y el panel (ver [`specs/cabeceras-seguridad/`](./specs/cabeceras-seguridad/requirements.md)).
 
